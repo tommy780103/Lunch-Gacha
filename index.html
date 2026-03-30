@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f0f1a">
+<title>ランチガチャ - 今日なに食べる？</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, 'Hiragino Sans', 'Segoe UI', sans-serif;
+    background: #0f0f1a;
+    color: #eee;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: env(safe-area-inset-top) 0 calc(24px + env(safe-area-inset-bottom)) 0;
+    overflow-x: hidden;
+  }
+
+  /* ヘッダー */
+  .app-header {
+    text-align: center;
+    margin: 28px 0 8px;
+  }
+  .app-header h1 {
+    font-size: 26px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #ff6b6b, #ffa940);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .app-header p {
+    font-size: 13px;
+    color: #666;
+    margin-top: 4px;
+  }
+
+  /* タブ */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin: 16px 0 0;
+  }
+  .tab {
+    padding: 10px 28px;
+    border: none;
+    border-radius: 10px 10px 0 0;
+    background: #1a1a2e;
+    color: #666;
+    font-size: 14px;
+    cursor: pointer;
+    transition: .2s;
+  }
+  .tab.active {
+    background: #1e1e36;
+    color: #fff;
+    font-weight: bold;
+  }
+
+  /* メインコンテナ */
+  .container {
+    background: #1e1e36;
+    border-radius: 0 0 20px 20px;
+    padding: 28px 24px;
+    width: 92%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+
+  /* キャンバス */
+  .wheel-wrapper {
+    position: relative;
+    margin: 8px 0 20px;
+    width: 100%;
+    max-width: 340px;
+    aspect-ratio: 1;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .pointer {
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 14px solid transparent;
+    border-right: 14px solid transparent;
+    border-top: 28px solid #ff6b6b;
+    filter: drop-shadow(0 2px 6px rgba(255,107,107,.5));
+    z-index: 2;
+  }
+
+  /* ボタン */
+  .btn-group {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .spin-btn, .stop-btn {
+    padding: 14px 44px;
+    font-size: 18px;
+    font-weight: bold;
+    border: none;
+    border-radius: 50px;
+    color: #fff;
+    cursor: pointer;
+    transition: .2s;
+  }
+  .spin-btn {
+    background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+  }
+  .stop-btn {
+    background: linear-gradient(135deg, #4ecdc4, #2eaf7d);
+  }
+  .spin-btn:hover, .stop-btn:hover { transform: scale(1.05); }
+  .spin-btn:disabled, .stop-btn:disabled { opacity: .4; cursor: default; transform: none; }
+
+  /* 結果 */
+  .result-area {
+    text-align: center;
+    min-height: 48px;
+    margin-bottom: 4px;
+  }
+  .result-text {
+    font-size: 28px;
+    font-weight: 800;
+    color: #ffa940;
+  }
+
+  /* お店を探すボタン */
+  .map-btn {
+    display: none;
+    margin-top: 12px;
+    padding: 12px 28px;
+    font-size: 15px;
+    font-weight: bold;
+    border: none;
+    border-radius: 50px;
+    background: linear-gradient(135deg, #4285f4, #34a853);
+    color: #fff;
+    cursor: pointer;
+    transition: .2s;
+    text-decoration: none;
+  }
+  .map-btn:hover { transform: scale(1.05); opacity: .9; }
+
+  /* 位置情報ステータス */
+  .location-status {
+    font-size: 12px;
+    color: #555;
+    margin-top: 8px;
+    text-align: center;
+  }
+  .location-status.ok { color: #4ecdc4; }
+  .location-status.ng { color: #ff6b6b; }
+
+  /* 項目選択エリア */
+  .select-area {
+    width: 100%;
+    margin-top: 20px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 16px;
+  }
+  .select-area .area-label {
+    font-size: 13px;
+    color: #888;
+    display: block;
+    margin-bottom: 10px;
+  }
+  .select-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .item-toggle {
+    padding: 7px 14px;
+    border: 2px solid #2a2a4a;
+    border-radius: 20px;
+    background: transparent;
+    color: #666;
+    font-size: 13px;
+    cursor: pointer;
+    transition: .2s;
+  }
+  .item-toggle.active {
+    background: rgba(255,107,107,.15);
+    border-color: #ff6b6b;
+    color: #fff;
+  }
+  .item-toggle:hover { border-color: #ff6b6b; }
+  .add-item-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .add-item-row input {
+    flex: 1;
+    padding: 8px 14px;
+    background: #0f0f1a;
+    border: 1px solid #2a2a4a;
+    border-radius: 20px;
+    color: #eee;
+    font-size: 16px;
+    outline: none;
+  }
+  .add-item-row input:focus { border-color: #ff6b6b; }
+  .add-item-row button {
+    padding: 8px 16px;
+    background: #2a2a4a;
+    border: none;
+    border-radius: 20px;
+    color: #ccc;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: .2s;
+  }
+  .add-item-row button:hover { background: #3a3a5a; color: #fff; }
+  .select-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .select-actions button {
+    padding: 5px 12px;
+    background: none;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    color: #666;
+    font-size: 11px;
+    cursor: pointer;
+    transition: .2s;
+  }
+  .select-actions button:hover { background: #2a2a4a; color: #fff; }
+  .item-toggle .remove-x {
+    margin-left: 5px;
+    font-size: 11px;
+    opacity: .5;
+  }
+  .item-toggle .remove-x:hover { opacity: 1; }
+  .warn-msg {
+    color: #ff6b6b;
+    font-size: 12px;
+    margin-top: 6px;
+    min-height: 18px;
+  }
+
+  /* カスタム入力 */
+  .custom-area {
+    width: 100%;
+    margin-top: 20px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 16px;
+  }
+  .custom-area label {
+    font-size: 13px;
+    color: #888;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .custom-area textarea {
+    width: 100%;
+    height: 100px;
+    background: #0f0f1a;
+    border: 1px solid #2a2a4a;
+    border-radius: 10px;
+    color: #eee;
+    padding: 10px;
+    font-size: 16px;
+    resize: vertical;
+  }
+  .custom-area .apply-btn {
+    margin-top: 8px;
+    padding: 8px 20px;
+    background: #2a2a4a;
+    color: #ccc;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .custom-area .apply-btn:hover { background: #3a3a5a; color: #fff; }
+
+  /* スマホ向け */
+  @media (max-width: 480px) {
+    .app-header { margin: 16px 0 6px; }
+    .app-header h1 { font-size: 22px; }
+    .app-header p { font-size: 12px; }
+    .tabs { margin: 10px 0 0; }
+    .tab { padding: 8px 22px; font-size: 13px; }
+    .container { padding: 20px 16px; width: 96%; }
+    .wheel-wrapper { margin: 4px 0 16px; }
+    .spin-btn, .stop-btn { padding: 12px 36px; font-size: 16px; }
+    .result-text { font-size: 24px; }
+    .map-btn { padding: 11px 22px; font-size: 14px; }
+    .item-toggle { padding: 6px 12px; font-size: 12px; }
+    .select-grid { gap: 6px; }
+    .add-item-row input { padding: 8px 12px; }
+  }
+
+  /* 超小型画面 */
+  @media (max-width: 360px) {
+    .container { padding: 16px 12px; }
+    .spin-btn, .stop-btn { padding: 10px 28px; font-size: 15px; }
+    .item-toggle { padding: 5px 10px; font-size: 11px; }
+  }
+
+  /* hover無効化（タッチデバイス） */
+  @media (hover: none) {
+    .spin-btn:hover, .stop-btn:hover, .map-btn:hover,
+    .item-toggle:hover, .select-actions button:hover,
+    .add-item-row button:hover, .custom-area .apply-btn:hover {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  /* ボタンのタッチフィードバック */
+  .spin-btn:active, .stop-btn:active { transform: scale(0.95); }
+  .map-btn:active { transform: scale(0.95); }
+  .item-toggle:active { transform: scale(0.95); }
+
+  @keyframes pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    70% { transform: scale(1.15); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes fadeUp {
+    0% { transform: translateY(12px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <h1>ランチガチャ</h1>
+  <p>迷ったらまわせ。近くのお店まで案内します。</p>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('lunch')">ランチ</button>
+  <button class="tab" onclick="switchTab('custom')">カスタム</button>
+</div>
+
+<div class="container">
+  <div class="wheel-wrapper">
+    <div class="pointer"></div>
+    <canvas id="wheelCanvas" width="340" height="340"></canvas>
+  </div>
+  <div class="btn-group">
+    <button class="spin-btn" id="spinBtn" onclick="spin()">まわす！</button>
+    <button class="stop-btn" id="stopBtn" onclick="stopSpin()" style="display:none">ストップ！</button>
+  </div>
+
+  <div class="result-area">
+    <div class="result-text" id="result"></div>
+    <a class="map-btn" id="mapBtn" target="_blank" rel="noopener">Google Maps で近くのお店を探す</a>
+    <div class="location-status" id="locationStatus"></div>
+  </div>
+
+  <!-- ランチ選択エリア -->
+  <div class="select-area" id="lunchSelectArea">
+    <span class="area-label">候補を選んでね：</span>
+    <div class="select-grid" id="lunchGrid"></div>
+    <div class="add-item-row">
+      <input type="text" id="addItemInput" placeholder="追加したいメニュー" onkeydown="if(event.key==='Enter')addCustomItem()">
+      <button onclick="addCustomItem()">追加</button>
+    </div>
+    <div class="select-actions">
+      <button onclick="toggleAll(true)">全選択</button>
+      <button onclick="toggleAll(false)">全解除</button>
+    </div>
+    <div class="warn-msg" id="warnMsg"></div>
+  </div>
+
+  <!-- カスタム入力エリア -->
+  <div class="custom-area" id="customArea" style="display:none;">
+    <label>項目を1行ずつ入力してください：</label>
+    <textarea id="customInput">項目1
+項目2
+項目3</textarea>
+    <button class="apply-btn" onclick="applyCustom()">反映する</button>
+  </div>
+</div>
+
+<script>
+const LUNCH_ITEMS = [
+  'うどん', 'ラーメン', '寿司', '焼肉', 'マック',
+  '定食', 'パスタ', 'カレー', '中華', '丼もの',
+  'ピザ', '弁当', 'パン'
+];
+
+const COLORS = [
+  '#ff6b6b', '#ee5a24', '#ffa940', '#4ecdc4', '#2eaf7d',
+  '#4285f4', '#9b59b6', '#f39c12', '#1abc9c', '#e74c3c',
+  '#3498db', '#27ae60', '#e67e22'
+];
+
+let allLunchItems = [...LUNCH_ITEMS];
+let lunchSelected = {};
+allLunchItems.forEach(item => lunchSelected[item] = true);
+let userAddedItems = new Set();
+
+let items = [...allLunchItems];
+let currentTab = 'lunch';
+let spinning = false;
+let currentAngle = 0;
+let userLat = null;
+let userLng = null;
+
+const canvas = document.getElementById('wheelCanvas');
+const ctx = canvas.getContext('2d');
+let cx, cy, radius;
+
+function resizeCanvas() {
+  const wrapper = canvas.parentElement;
+  const size = Math.min(wrapper.clientWidth, 340);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cx = size / 2;
+  cy = size / 2;
+  radius = cx - 8;
+  drawWheel();
+}
+
+window.addEventListener('resize', resizeCanvas);
+
+// 位置情報を取得
+function getLocation() {
+  const statusEl = document.getElementById('locationStatus');
+  if (!navigator.geolocation) {
+    statusEl.textContent = '位置情報に非対応のブラウザです';
+    statusEl.className = 'location-status ng';
+    return;
+  }
+  statusEl.textContent = '位置情報を取得中...';
+  statusEl.className = 'location-status';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      statusEl.textContent = '現在地を取得しました';
+      statusEl.className = 'location-status ok';
+    },
+    () => {
+      statusEl.textContent = '位置情報を許可すると現在地付近で検索できます';
+      statusEl.className = 'location-status ng';
+    },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+function drawWheel() {
+  const n = items.length;
+  const arc = (2 * Math.PI) / n;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
+  ctx.shadowBlur = 16;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+  ctx.fillStyle = '#111';
+  ctx.fill();
+  ctx.restore();
+
+  for (let i = 0; i < n; i++) {
+    const startAngle = currentAngle + i * arc;
+    const endAngle = startAngle + arc;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, startAngle, endAngle);
+    ctx.closePath();
+    ctx.fillStyle = COLORS[i % COLORS.length];
+    ctx.fill();
+    ctx.strokeStyle = '#0f0f1a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(startAngle + arc / 2);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${n > 10 ? 12 : 14}px -apple-system, 'Hiragino Sans', sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(items[i], radius * 0.62, 0);
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, 20, 0, 2 * Math.PI);
+  ctx.fillStyle = '#0f0f1a';
+  ctx.fill();
+  ctx.strokeStyle = '#ff6b6b';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+}
+
+let animId = null;
+let stopRequested = false;
+let spinSpeed = 0;
+
+function spin() {
+  if (spinning || items.length < 2) return;
+  spinning = true;
+  stopRequested = false;
+  document.getElementById('spinBtn').style.display = 'none';
+  document.getElementById('stopBtn').style.display = 'inline-block';
+  document.getElementById('result').textContent = '';
+  document.getElementById('mapBtn').style.display = 'none';
+
+  spinSpeed = 0.15 + Math.random() * 0.05;
+  let lastTime = performance.now();
+
+  function animateConstant(now) {
+    const dt = now - lastTime;
+    lastTime = now;
+    currentAngle = (currentAngle + spinSpeed * dt / 16) % (Math.PI * 2);
+    drawWheel();
+    if (!stopRequested) {
+      animId = requestAnimationFrame(animateConstant);
+    } else {
+      decelerate();
+    }
+  }
+  animId = requestAnimationFrame(animateConstant);
+}
+
+function stopSpin() {
+  if (!spinning || stopRequested) return;
+  stopRequested = true;
+  document.getElementById('stopBtn').disabled = true;
+}
+
+function decelerate() {
+  const duration = 2000 + Math.random() * 1000;
+  const startSpeed = spinSpeed;
+  const start = performance.now();
+
+  function animateSlow(now) {
+    const elapsed = now - start;
+    const t = Math.min(elapsed / duration, 1);
+    const easedT = 1 - Math.pow(1 - t, 3);
+    const curSpeed = startSpeed * (1 - easedT);
+
+    currentAngle = (currentAngle + curSpeed) % (Math.PI * 2);
+    drawWheel();
+
+    if (t < 1) {
+      animId = requestAnimationFrame(animateSlow);
+    } else {
+      spinning = false;
+      stopRequested = false;
+      document.getElementById('stopBtn').style.display = 'none';
+      document.getElementById('stopBtn').disabled = false;
+      document.getElementById('spinBtn').style.display = 'inline-block';
+      showResult();
+    }
+  }
+  animId = requestAnimationFrame(animateSlow);
+}
+
+function showResult() {
+  const n = items.length;
+  const arc = (2 * Math.PI) / n;
+  const pointerAngle = Math.PI * 1.5;
+  let normalizedAngle = (pointerAngle - currentAngle % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2);
+  let index = Math.floor(normalizedAngle / arc);
+  if (index >= n) index = 0;
+
+  const chosen = items[index];
+  const resultEl = document.getElementById('result');
+  resultEl.textContent = chosen;
+  resultEl.style.animation = 'none';
+  resultEl.offsetHeight;
+  resultEl.style.animation = 'pop .4s ease';
+
+  // Google Maps 検索リンクを生成
+  const mapBtn = document.getElementById('mapBtn');
+  let query = encodeURIComponent(chosen);
+  let url;
+  if (userLat && userLng) {
+    url = `https://www.google.com/maps/search/${query}/@${userLat},${userLng},15z`;
+  } else {
+    url = `https://www.google.com/maps/search/${query}+近く`;
+  }
+  mapBtn.href = url;
+  mapBtn.style.display = 'inline-block';
+  mapBtn.style.animation = 'fadeUp .4s ease';
+}
+
+function buildLunchGrid() {
+  const grid = document.getElementById('lunchGrid');
+  grid.innerHTML = '';
+  allLunchItems.forEach(name => {
+    const btn = document.createElement('button');
+    btn.className = 'item-toggle' + (lunchSelected[name] ? ' active' : '');
+    btn.appendChild(document.createTextNode(name));
+
+    if (userAddedItems.has(name)) {
+      const x = document.createElement('span');
+      x.className = 'remove-x';
+      x.textContent = ' x';
+      x.onclick = (e) => { e.stopPropagation(); removeCustomItem(name); };
+      btn.appendChild(x);
+    }
+
+    btn.onclick = () => {
+      lunchSelected[name] = !lunchSelected[name];
+      btn.classList.toggle('active');
+      updateLunchItems();
+    };
+    grid.appendChild(btn);
+  });
+}
+
+function addCustomItem() {
+  const input = document.getElementById('addItemInput');
+  const name = input.value.trim();
+  if (!name || allLunchItems.includes(name)) { input.value = ''; return; }
+  allLunchItems.push(name);
+  lunchSelected[name] = true;
+  userAddedItems.add(name);
+  input.value = '';
+  buildLunchGrid();
+  updateLunchItems();
+}
+
+function removeCustomItem(name) {
+  allLunchItems = allLunchItems.filter(n => n !== name);
+  delete lunchSelected[name];
+  userAddedItems.delete(name);
+  buildLunchGrid();
+  updateLunchItems();
+}
+
+function toggleAll(state) {
+  allLunchItems.forEach(name => lunchSelected[name] = state);
+  buildLunchGrid();
+  updateLunchItems();
+}
+
+function updateLunchItems() {
+  const selected = allLunchItems.filter(name => lunchSelected[name]);
+  const warn = document.getElementById('warnMsg');
+  if (selected.length < 2) {
+    warn.textContent = '2つ以上選んでください';
+    document.getElementById('spinBtn').disabled = true;
+    return;
+  }
+  warn.textContent = '';
+  items = selected;
+  currentAngle = 0;
+  document.getElementById('result').textContent = '';
+  document.getElementById('mapBtn').style.display = 'none';
+  document.getElementById('spinBtn').disabled = false;
+  drawWheel();
+}
+
+function switchTab(tab) {
+  if (spinning) return;
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  if (tab === 'lunch') {
+    document.querySelectorAll('.tab')[0].classList.add('active');
+    document.getElementById('lunchSelectArea').style.display = '';
+    document.getElementById('customArea').style.display = 'none';
+    updateLunchItems();
+  } else {
+    document.querySelectorAll('.tab')[1].classList.add('active');
+    document.getElementById('lunchSelectArea').style.display = 'none';
+    document.getElementById('customArea').style.display = 'block';
+    applyCustom();
+  }
+  document.getElementById('result').textContent = '';
+  document.getElementById('mapBtn').style.display = 'none';
+  currentAngle = 0;
+  drawWheel();
+}
+
+function applyCustom() {
+  const text = document.getElementById('customInput').value.trim();
+  const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+  if (lines.length >= 2) {
+    items = lines;
+    currentAngle = 0;
+    document.getElementById('result').textContent = '';
+    document.getElementById('mapBtn').style.display = 'none';
+    drawWheel();
+  }
+}
+
+// 初期化
+getLocation();
+buildLunchGrid();
+resizeCanvas();
+</script>
+
+</body>
+</html>
