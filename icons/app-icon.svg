@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>ランチガチャ</title>
+  <desc>濃紺の背景に、オレンジ色のお皿と白いカトラリー、ミント色のサイコロ。</desc>
+  <path fill="#19192d" d="M0 0h512v512H0z"/>
+  <circle cx="244" cy="291" r="160" fill="#10101d"/>
+  <circle cx="244" cy="278" r="160" fill="#ff8855"/>
+  <circle cx="244" cy="278" r="133" fill="#ffcf9d"/>
+  <circle cx="244" cy="278" r="125" fill="#f77952"/>
+  <g fill="#fff8ed">
+    <path d="M185 198a7 7 0 0 1 14 0v42h9v-42a7 7 0 0 1 14 0v42h9v-42a7 7 0 0 1 14 0v47c0 16-10 28-23 32v75a11 11 0 0 1-22 0v-75c-12-5-15-17-15-32z"/>
+    <path d="M296 191c19 0 31 20 31 45 0 20-8 34-20 39v77a11 11 0 0 1-22 0v-77c-12-5-20-19-20-39 0-25 12-45 31-45z"/>
+  </g>
+  <g transform="translate(369 142) rotate(12)">
+    <rect x="-66" y="-58" width="132" height="132" rx="30" fill="#153236"/>
+    <rect x="-66" y="-66" width="132" height="132" rx="30" fill="#71ddcf"/>
+    <g fill="#153d43">
+      <circle cx="-29" cy="-29" r="10"/>
+      <circle cx="0" cy="0" r="10"/>
+      <circle cx="29" cy="29" r="10"/>
+    </g>
+  </g>
+  <path d="M138 71 144 86 159 92 144 98 138 113 132 98 117 92 132 86Z" fill="#ffa940"/>
+</svg>
