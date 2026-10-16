@@ -2,12 +2,12 @@
 
 ## 最初に読む
 
-未読の[ワークスペース案内](/Users/tommy/my-workspace/AGENTS.md)、[開発ルール](/Users/tommy/my-workspace/dev/AGENTS.md)、[ツール分類の案内](/Users/tommy/my-workspace/dev/tools/AGENTS.md)を次の順で読みます。
+ワークスペース内で作業する場合、未読の[ワークスペース案内](../../../AGENTS.md)、[開発ルール](../../AGENTS.md)、[ツール分類の案内](../AGENTS.md)を次の順で読みます。
 
 ```text
-/Users/tommy/my-workspace/AGENTS.md
-/Users/tommy/my-workspace/dev/AGENTS.md
-/Users/tommy/my-workspace/dev/tools/AGENTS.md
+../../../AGENTS.md
+../../AGENTS.md
+../AGENTS.md
 ```
 
 README と、関連する直近の実装記録も確認します。
