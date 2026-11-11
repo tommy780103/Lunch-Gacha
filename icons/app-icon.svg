@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <title>ランチガチャ</title>
+  <title>きょうめし</title>
   <desc>濃紺の背景に、オレンジ色のお皿と白いカトラリー、ミント色のサイコロ。</desc>
   <path fill="#19192d" d="M0 0h512v512H0z"/>
   <circle cx="244" cy="291" r="160" fill="#10101d"/>
@@ -21,3 +21,4 @@
   </g>
   <path d="M138 71 144 86 159 92 144 98 138 113 132 98 117 92 132 86Z" fill="#ffa940"/>
 </svg>
+
