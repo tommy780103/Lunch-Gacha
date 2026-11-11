@@ -156,7 +156,9 @@
         saveQuota(generation, null);
         throw fail('REQUEST_FAILED', '店舗情報と利用回数を確認できませんでした。もう一度お試しください。');
       }
-      return core.filterPlaces(payload.places, center, filters);
+      // Keep every matching candidate from this single Google response. The UI
+      // merges genres and their labels before selecting the final ten places.
+      return core.filterPlaces(payload.places, center, filters, 20);
     } catch (error) {
       if (generation === quotaGeneration && !lastQuota) quotaStatus = 'error';
       if (['NOT_CONFIGURED', 'QUOTA_EXCEEDED', 'NETWORK', 'REQUEST_FAILED'].includes(error && error.code)) throw error;

@@ -5,6 +5,7 @@
   let busy = false;
   let generation = 0;
   let origin = null;
+  const selectedGenres = new Set();
   const byId = id => document.getElementById(id);
 
   function setStatus(message, state = 'ready') {
@@ -13,8 +14,12 @@
   }
 
   function updateFallback() {
-    const genre = byId('genreInput').value.trim();
-    byId('normalSearchLink').href = LunchSearchCore.buildSearchUrl(genre || '飲食店', origin);
+    const genres = getSelectedGenres();
+    byId('normalSearchLink').href = LunchSearchCore.buildSearchUrl(genres, origin);
+  }
+
+  function getSelectedGenres() {
+    return LunchSearchCore.normalizeGenres([...selectedGenres, byId('genreInput').value]);
   }
 
   function clearResults() {
@@ -27,10 +32,11 @@
   }
 
   function syncGenres() {
-    const chosen = byId('genreInput').value.trim();
     byId('genreGrid').querySelectorAll('button').forEach(button => {
-      button.setAttribute('aria-pressed', String(button.dataset.genre === chosen));
+      button.setAttribute('aria-pressed', String(selectedGenres.has(button.dataset.genre)));
     });
+    const count = getSelectedGenres().length;
+    byId('genreSelectionSummary').textContent = `${count}ジャンル選択中／検索は最大${count}回分使用（全利用者で1日20回・月600回まで）`;
   }
 
   function readyMessage() {
@@ -71,7 +77,11 @@
   }
 
   function chooseGenre(genre) {
-    byId('genreInput').value = String(genre).trim().slice(0, 80);
+    const chosen = LunchSearchCore.normalizeGenres([genre])[0] || '';
+    const preset = options.genres.find(item => LunchSearchCore.genreQuery(item) === LunchSearchCore.genreQuery(chosen));
+    selectedGenres.clear();
+    if (preset) selectedGenres.add(preset);
+    byId('genreInput').value = preset ? '' : chosen;
     syncGenres();
     clearResults();
     readyMessage();
@@ -101,7 +111,7 @@
     } catch { return null; }
   }
 
-  function renderResults(places, genre, criteria) {
+  function renderResults(places, genres, criteria) {
     const list = byId('restaurantList');
     list.replaceChildren();
     for (const [index, place] of places.entries()) {
@@ -112,6 +122,10 @@
       stats.append(createTextElement('span', '', place.reviewCount === null ? '口コミ情報なし' : `口コミ ${place.reviewCount.toLocaleString('ja-JP')}件`));
       stats.append(createTextElement('span', '', LunchSearchCore.formatDistance(place.distanceKm)));
       card.append(stats);
+      const tags = createTextElement('div', 'restaurant-genres', '');
+      tags.append(createTextElement('span', 'restaurant-genres-label', '検索ジャンル：'));
+      for (const genre of place.genres) tags.append(createTextElement('span', 'restaurant-genre-tag', genre));
+      card.append(tags);
       const href = safeExternalLink(place.mapsUrl);
       if (href) {
         const link = createTextElement('a', 'restaurant-link', 'Googleマップでお店を見る ↗');
@@ -137,7 +151,8 @@
       }
       list.append(card);
     }
-    byId('resultsTitle').textContent = `${genre}のお店 ${places.length}件`;
+    byId('resultsTitle').textContent = `お店 ${places.length}件`;
+    byId('resultGenres').textContent = `検索済み：${genres.join('、')}`;
     byId('resultCriteria').textContent = LunchSearchCore.describeCriteria(criteria);
     byId('searchResults').hidden = false;
     const shortlist = LunchSearchCore.buildShortlistUrl(places.map(place => place.id));
@@ -145,19 +160,41 @@
       byId('shortlistLink').href = shortlist;
       byId('shortlistLink').hidden = false;
     }
-    if (!places.length) {
-      setStatus('取得した候補に、条件に合うお店がありませんでした。距離を広げるか、評価・口コミ件数の条件を変更して検索してください。', 'empty');
+  }
+
+  function errorMessage(error) {
+    const messages = {
+      NOT_CONFIGURED: '条件つき検索は準備中です。',
+      QUOTA_EXCEEDED: '条件つき検索の利用上限に達したため、検索を停止しました。',
+      QUOTA_UNAVAILABLE: '利用回数を確認できないため、検索を停止しました。利用回数の「更新」でもう一度確認できます。',
+      LOCATION_DENIED: '現在地の利用が許可されていません。ブラウザーの位置情報設定を確認してください。',
+      LOCATION_UNAVAILABLE: '現在地を取得できませんでした。時間をおいてお試しください。',
+      NETWORK: '通信できなかったため、検索を停止しました。接続を確認してください。'
+    };
+    return messages[error.code] || 'お店情報を取得できなかったため、検索を停止しました。';
+  }
+
+  function showBatchOutcome(groups, genres, criteria, stopped) {
+    const places = LunchSearchCore.mergeGenreResults(groups, criteria);
+    if (groups.length) renderResults(places, groups.map(group => group.genre), criteria);
+    if (stopped) {
+      const progress = groups.length ? `${genres.length}ジャンル中${groups.length}ジャンルを検索し、${places.length}件を表示しています。` : '';
+      const failed = stopped.failed ? ` 検索できなかったジャンル：${stopped.failed}。` : '';
+      const remaining = stopped.unsearched.length ? ` 未検索：${stopped.unsearched.join('、')}。` : '';
+      setStatus(`${progress}${errorMessage(stopped.error)}${failed}${remaining}`, groups.length ? 'partial' : 'error');
+    } else if (!places.length) {
+      setStatus(`${genres.length}ジャンルを検索しましたが、条件に合うお店がありませんでした。距離や評価・口コミ件数の条件を変更して検索してください。`, 'empty');
     } else {
-      setStatus(`${places.length}件見つかりました。気になるお店をGoogleマップで確認できます。`, 'success');
+      setStatus(`${genres.length}ジャンルを検索し、${places.length}件見つかりました。気になるお店をGoogleマップで確認できます。`, 'success');
     }
   }
 
   async function search(event) {
     event.preventDefault();
     if (busy) return;
-    const genre = byId('genreInput').value.trim();
-    if (!genre) {
-      setStatus('ジャンルを選ぶか、店名を入力してください。', 'error');
+    const genres = getSelectedGenres();
+    if (!genres.length) {
+      setStatus('ジャンルを1つ以上選ぶか、追加のジャンル・店名を入力してください。', 'error');
       byId('genreInput').focus();
       return;
     }
@@ -173,28 +210,44 @@
       sort: byId('sortOrder').value
     });
     const requestGeneration = generation;
+    const groups = [];
     setBusy(true);
     setStatus('現在地を確認しています…', 'loading');
     try {
       origin = await options.getLocation();
       if (generation !== requestGeneration) return;
       updateFallback();
-      setStatus('評価・口コミ件数を確認して、お店を探しています…', 'loading');
-      const request = LunchPlaces.search(genre, origin, criteria);
-      updateQuota();
-      const places = await request;
-      if (generation !== requestGeneration) return;
-      renderResults(places, genre, criteria);
+      for (const [index, genre] of genres.entries()) {
+        if (generation !== requestGeneration) return;
+        const quota = LunchPlaces.getQuota();
+        // The first POST checks the authoritative server state, including a
+        // period rollover. Only this batch's fresh counts gate later searches.
+        if (index > 0 && (!quota || quota.dayUsed >= quota.dayLimit || quota.monthUsed >= quota.monthLimit)) {
+          showBatchOutcome(groups, genres, criteria, {
+            error: { code: quota ? 'QUOTA_EXCEEDED' : 'QUOTA_UNAVAILABLE' }, unsearched: genres.slice(index)
+          });
+          return;
+        }
+        setStatus(`${index + 1}/${genres.length}ジャンル目：${genre}のお店を探しています…`, 'loading');
+        try {
+          if (generation !== requestGeneration) return;
+          const request = LunchPlaces.search(genre, origin, criteria);
+          updateQuota();
+          const places = await request;
+          if (generation !== requestGeneration) return;
+          groups.push({ genre, places });
+          renderResults(LunchSearchCore.mergeGenreResults(groups, criteria), groups.map(group => group.genre), criteria);
+          updateQuota();
+        } catch (error) {
+          if (generation !== requestGeneration) return;
+          showBatchOutcome(groups, genres, criteria, { error, failed: genre, unsearched: genres.slice(index + 1) });
+          return;
+        }
+      }
+      showBatchOutcome(groups, genres, criteria);
     } catch (error) {
       if (generation !== requestGeneration) return;
-      const messages = {
-        NOT_CONFIGURED: '条件つき検索は準備中です。通常のGoogleマップ検索をご利用ください。',
-        QUOTA_EXCEEDED: '条件つき検索の利用上限に達しました。通常のGoogleマップ検索をご利用ください。',
-        LOCATION_DENIED: '現在地の利用が許可されていません。ブラウザーの位置情報設定を確認するか、通常のGoogleマップ検索をご利用ください。',
-        LOCATION_UNAVAILABLE: '現在地を取得できませんでした。時間をおいて試すか、通常のGoogleマップ検索をご利用ください。',
-        NETWORK: '通信できませんでした。接続を確認して、もう一度お試しください。'
-      };
-      setStatus(messages[error.code] || '条件つき検索を利用できませんでした。通常のGoogleマップ検索をご利用ください。', 'error');
+      showBatchOutcome(groups, genres, criteria, { error, unsearched: genres.slice(groups.length) });
     } finally {
       updateQuota();
       setBusy(false);
@@ -209,7 +262,14 @@
       button.type = 'button';
       button.dataset.genre = genre;
       button.setAttribute('aria-pressed', 'false');
-      button.addEventListener('click', () => chooseGenre(genre));
+      button.addEventListener('click', () => {
+        if (busy) return;
+        if (selectedGenres.has(genre)) selectedGenres.delete(genre);
+        else selectedGenres.add(genre);
+        syncGenres();
+        clearResults();
+        readyMessage();
+      });
       grid.append(button);
     }
     byId('genreInput').addEventListener('input', () => {

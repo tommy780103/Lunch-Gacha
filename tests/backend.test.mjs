@@ -325,6 +325,22 @@ test('bad input and client key/quota/endpoint/object/field overrides are rejecte
   ]) assert.throws(() => validateSearchInput(body), { code: 'INVALID_REQUEST' });
 });
 
+test('omitted radius uses the 1km search area while an explicit 5km choice remains wider', () => {
+  const explicitOne = validateSearchInput({ ...input, criteria: { radiusKm: 1 } });
+  for (const criteria of [undefined, {}, { minRating: 3.5 }]) {
+    const validated = validateSearchInput({ ...input, criteria });
+    assert.equal(validated.criteria.radiusKm, 1);
+    assert.deepEqual(googleSearchBody(validated).locationRestriction, googleSearchBody(explicitOne).locationRestriction);
+  }
+  assert.deepEqual(explicitOne.criteria, { minRating: 4, minReviews: 100, radiusKm: 1, sort: 'rating' });
+  const explicitFive = validateSearchInput({ ...input, criteria: { radiusKm: 5 } });
+  assert.equal(explicitFive.criteria.radiusKm, 5);
+  const one = googleSearchBody(explicitOne).locationRestriction.rectangle;
+  const five = googleSearchBody(explicitFive).locationRestriction.rectangle;
+  assert.ok(five.low.latitude < one.low.latitude && five.high.latitude > one.high.latitude);
+  assert.ok(five.low.longitude < one.low.longitude && five.high.longitude > one.high.longitude);
+});
+
 test('new filter choices preserve values and omit the Google rating restriction for no minimum', () => {
   for (const minRating of [0, 3.5]) {
     for (const minReviews of [0, 1000]) {

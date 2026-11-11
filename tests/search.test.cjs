@@ -40,7 +40,7 @@ function adapterHarness({ configured = true, config, fetch, timers, page = 'http
   return { api: root.LunchPlaces, requests, root };
 }
 
-function uiHarness(api) {
+function uiHarness(api, { genres = ['うどん'], getLocation } = {}) {
   class Element {
     constructor(tag = 'div') { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.textContent = ''; this.value = ''; }
     append(...children) { this.children.push(...children); }
@@ -48,7 +48,7 @@ function uiHarness(api) {
     setAttribute(name, value) { this[name] = value; }
     removeAttribute(name) { delete this[name]; }
     addEventListener(name, callback) { this.listeners[name] = callback; }
-    querySelectorAll() { return this.children; }
+    querySelectorAll() { return this.children.flatMap(child => [child, ...child.querySelectorAll()]); }
     focus() {}
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
@@ -57,7 +57,7 @@ function uiHarness(api) {
   Object.assign(elements.minReviews, { value: '0' });
   Object.assign(elements.radiusKm, { value: '0.1' });
   Object.assign(elements.sortOrder, { value: 'rating' });
-  elements.restaurantSearchForm.children = ['genreInput', 'minRating', 'minReviews', 'radiusKm', 'sortOrder', 'searchBtn'].map(id => elements[id]);
+  elements.restaurantSearchForm.children = ['genreGrid', 'genreInput', 'minRating', 'minReviews', 'radiusKm', 'sortOrder', 'searchBtn'].map(id => elements[id]);
   const window = {};
   const document = {
     getElementById: id => elements[id],
@@ -66,12 +66,12 @@ function uiHarness(api) {
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../search-ui.js'), 'utf8'), { window, document, LunchPlaces: api, LunchSearchCore: core, URL });
   let locationCalls = 0;
-  window.LunchSearchUI.init({ genres: ['うどん'], getLocation: async () => { locationCalls++; return origin; } });
-  return { elements, get locationCalls() { return locationCalls; } };
+  window.LunchSearchUI.init({ genres, getLocation: async () => { locationCalls++; return getLocation ? getLocation() : origin; } });
+  return { elements, api: window.LunchSearchUI, get locationCalls() { return locationCalls; } };
 }
 
 test('criteria keep decimal ratings and use safe defaults for missing/non-finite input', () => {
-  assert.deepEqual(core.normalizeCriteria(), { minRating: 4, minReviews: 100, radiusKm: 5, sort: 'rating' });
+  assert.deepEqual(core.normalizeCriteria(), { minRating: 4, minReviews: 100, radiusKm: 1, sort: 'rating' });
   assert.equal(core.normalizeCriteria({ minRating: '4.2' }).minRating, 4.2);
   assert.deepEqual(core.normalizeCriteria({ minRating: NaN, minReviews: null, radiusKm: Infinity, sort: 'random' }), core.DEFAULTS);
 });
@@ -143,10 +143,10 @@ test('ranking obeys requested priority with predictable tiebreaks, removes dupli
     place('nearWinner', { rating: 4.3 }),
     place('reviewWinner')
   ];
-  assert.equal(core.filterPlaces(candidates, origin, { sort: 'rating' })[0].id, 'ratingWinner');
-  assert.equal(core.filterPlaces(candidates, origin, { sort: 'reviews' })[0].id, 'reviewWinner');
-  assert.equal(core.filterPlaces(candidates, origin, { sort: 'distance' })[0].id, 'nearWinner');
-  assert.equal(core.filterPlaces(candidates, origin, {}).length, 3);
+  assert.equal(core.filterPlaces(candidates, origin, { sort: 'rating', radiusKm: 5 })[0].id, 'ratingWinner');
+  assert.equal(core.filterPlaces(candidates, origin, { sort: 'reviews', radiusKm: 5 })[0].id, 'reviewWinner');
+  assert.equal(core.filterPlaces(candidates, origin, { sort: 'distance', radiusKm: 5 })[0].id, 'nearWinner');
+  assert.equal(core.filterPlaces(candidates, origin, { radiusKm: 5 }).length, 3);
   const many = Array.from({ length: 20 }, (_, index) => place(`id${index}`));
   const first = core.filterPlaces(many, origin, {}).map(item => item.id);
   assert.equal(first.length, 10);
@@ -477,7 +477,148 @@ test('UI renders unknown ratings and reviews with unset filters and meter labels
   assert.equal(ui.elements.quotaMonthUsed.textContent, '2回');
   assert.equal(ui.elements.quotaMonthRemaining.textContent, '598回');
   assert.equal(ui.elements.quotaDayRemaining.textContent, '18回');
+  assert.deepEqual(ui.elements.restaurantList.children[0].children[2].children.map(element => element.textContent), ['検索ジャンル：', 'うどん']);
   assert.equal(ui.locationCalls, 1);
   assert.deepEqual(adapter.requests.map(({ options }) => options.method), ['GET', 'POST']);
+});
+
+test('genre toggles keep optional input, deduplicate aliases and allow a gacha choice to replace all selections', async () => {
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: () => response({ quota: quota() }) });
+  const ui = uiHarness(adapter.api, { genres: ['うどん', 'ラーメン', 'マック'] });
+  const [udon, ramen, mac] = ui.elements.genreGrid.children;
+  assert.equal(udon['aria-pressed'], 'true');
+  assert.equal(ui.elements.genreInput.value, '');
+  ramen.listeners.click();
+  ui.elements.genreInput.value = 'マクドナルド';
+  ui.elements.genreInput.listeners.input();
+  mac.listeners.click();
+  assert.equal(ui.elements.genreInput.value, 'マクドナルド');
+  assert.match(ui.elements.genreSelectionSummary.textContent, /^3ジャンル選択中／検索は最大3回分使用/);
+  ramen.listeners.click();
+  assert.equal(ramen['aria-pressed'], 'false');
+  assert.match(ui.elements.genreSelectionSummary.textContent, /^2ジャンル/);
+  ui.api.chooseGenre('ラーメン');
+  assert.equal(ui.elements.genreInput.value, '');
+  assert.deepEqual(ui.elements.genreGrid.children.map(button => button['aria-pressed']), ['false', 'true', 'false']);
+  assert.match(ui.elements.genreSelectionSummary.textContent, /^1ジャンル/);
+  ui.api.chooseGenre('ハンバーグ');
+  assert.equal(ui.elements.genreInput.value, 'ハンバーグ');
+  assert.equal(ui.elements.genreGrid.children.every(button => button['aria-pressed'] === 'false'), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(adapter.requests.every(({ options }) => options.method === 'GET'), true);
+});
+
+test('multiple genres search serially with one location lookup and merge duplicate restaurant labels', async () => {
+  const resolvers = [];
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+    ? response({ quota: quota({ dayUsed: 0, monthUsed: 0 }) })
+    : new Promise(resolve => { resolvers.push(resolve); }) });
+  const ui = uiHarness(adapter.api, { genres: ['うどん', 'ラーメン'] });
+  ui.elements.genreGrid.children[1].listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  const search = ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(resolvers.length, 1, 'second genre waits for the first');
+  assert.equal(ui.elements.genreGrid.children.every(button => button.disabled), true);
+  await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  assert.equal(resolvers.length, 1, 'double submit cannot add another request');
+  resolvers[0](response({ places: [place('shared')], quota: quota() }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(resolvers.length, 2);
+  assert.equal(ui.elements.restaurantList.children.length, 1, 'first successful results are already visible');
+  resolvers[1](response({ places: [place('shared'), place('other')], quota: quota({ dayUsed: 2, monthUsed: 2 }) }));
+  await search;
+  const posts = adapter.requests.filter(({ options }) => options.method === 'POST');
+  assert.deepEqual(posts.map(({ options }) => JSON.parse(options.body).genre), ['うどん', 'ラーメン']);
+  assert.equal(ui.locationCalls, 1);
+  assert.equal(ui.elements.restaurantList.children.length, 2);
+  const shared = ui.elements.restaurantList.children.find(card => card.children[0].textContent.includes('店舗shared'));
+  assert.deepEqual(shared.children[2].children.map(element => element.textContent), ['検索ジャンル：', 'うどん', 'ラーメン']);
+  assert.match(ui.elements.resultGenres.textContent, /うどん、ラーメン/);
+  assert.equal(ui.elements.searchStatus.dataset.state, 'success');
+  assert.equal(ui.elements.quotaMonthUsed.textContent, '2回');
+});
+
+test('mid-batch errors and limits retain successful restaurants and name failed and unsearched genres', async () => {
+  for (const failedResponse of [
+    () => { throw new TypeError('offline'); },
+    () => response({ error: { code: 'QUOTA_EXCEEDED' }, quota: quota({ dayUsed: 20, monthUsed: 20 }) }, 429),
+    () => response({ places: [], quota: null })
+  ]) {
+    let posts = 0;
+    const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => {
+      if (options.method === 'GET') return response({ quota: quota() });
+      posts++;
+      return posts === 1 ? response({ places: [place('kept')], quota: quota({ dayUsed: 2, monthUsed: 2 }) }) : failedResponse();
+    } });
+    const ui = uiHarness(adapter.api, { genres: ['うどん', 'ラーメン', 'カレー'] });
+    ui.elements.genreGrid.children[1].listeners.click();
+    ui.elements.genreGrid.children[2].listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+    assert.equal(posts, 2, 'no retry and no third search after failure');
+    assert.equal(ui.elements.restaurantList.children.length, 1);
+    assert.match(ui.elements.restaurantList.children[0].children[0].textContent, /店舗kept/);
+    assert.equal(ui.elements.searchStatus.dataset.state, 'partial');
+    assert.match(ui.elements.searchStatus.textContent, /検索できなかったジャンル：ラーメン/);
+    assert.match(ui.elements.searchStatus.textContent, /未検索：カレー/);
+    assert.equal(ui.elements.searchBtn.disabled, false);
+  }
+});
+
+test('only fresh in-batch exhausted counts stop later genres; stale initial counts never block the first POST', async () => {
+  for (const counts of [quota({ dayUsed: 20, monthUsed: 30 }), quota({ dayUsed: 2, monthUsed: 600 })]) {
+    const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+      ? response({ quota: quota({ dayUsed: 20, monthUsed: 600 }) })
+      : response({ places: [place('kept')], quota: counts }) });
+    const ui = uiHarness(adapter.api, { genres: ['うどん', 'ラーメン'] });
+    ui.elements.genreGrid.children[1].listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+    assert.equal(adapter.requests.filter(({ options }) => options.method === 'POST').length, 1);
+    assert.equal(ui.elements.searchStatus.dataset.state, 'partial');
+    assert.match(ui.elements.searchStatus.textContent, /未検索：ラーメン/);
+    assert.equal(ui.elements.restaurantList.children.length, 1);
+  }
+});
+
+test('an initial quota read failure does not block a server-checked search', async () => {
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+    ? response({ error: { code: 'REQUEST_FAILED' } }, 503) : response() });
+  const ui = uiHarness(adapter.api);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(adapter.api.getQuota(), null);
+  await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  assert.equal(ui.elements.searchStatus.dataset.state, 'success');
+  assert.equal(adapter.requests.filter(({ options }) => options.method === 'POST').length, 1);
+});
+
+test('no genre selection makes no location request or search POST', async () => {
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: () => response({ quota: quota() }) });
+  const ui = uiHarness(adapter.api);
+  ui.elements.genreGrid.children[0].listeners.click();
+  await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  assert.equal(ui.locationCalls, 0);
+  assert.equal(adapter.requests.some(({ options }) => options.method === 'POST'), false);
+  assert.match(ui.elements.searchStatus.textContent, /ジャンルを1つ以上/);
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test('a replacement genre during a pending search discards its results and prevents following requests', async () => {
+  let resolveSearch;
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+    ? response({ quota: quota() }) : new Promise(resolve => { resolveSearch = resolve; }) });
+  const ui = uiHarness(adapter.api, { genres: ['うどん', 'ラーメン', 'カレー'] });
+  ui.elements.genreGrid.children[1].listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  const search = ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  ui.api.chooseGenre('カレー');
+  resolveSearch(response());
+  await search;
+  assert.equal(adapter.requests.filter(({ options }) => options.method === 'POST').length, 1);
+  assert.equal(ui.elements.searchResults.hidden, true);
+  assert.equal(ui.elements.restaurantList.children.length, 0);
+  assert.deepEqual(ui.elements.genreGrid.children.map(button => button['aria-pressed']), ['false', 'false', 'true']);
 });
 

@@ -111,7 +111,7 @@ export function validateSearchInput(input) {
   onlyKeys(criteria, ['minRating', 'minReviews', 'radiusKm', 'sort']);
   const minRating = numberInRange(criteria.minRating === undefined ? 4 : criteria.minRating, 0, 5);
   const minReviews = numberInRange(criteria.minReviews === undefined ? 100 : criteria.minReviews, 0, 1000000);
-  const radiusKm = numberInRange(criteria.radiusKm === undefined ? 5 : criteria.radiusKm, 0.1, 50);
+  const radiusKm = numberInRange(criteria.radiusKm === undefined ? 1 : criteria.radiusKm, 0.1, 50);
   const sort = criteria.sort === undefined ? 'rating' : criteria.sort;
   if (!Number.isSafeInteger(minReviews) || !['rating', 'reviews', 'distance'].includes(sort)) invalid();
   return { genre: input.genre.trim(), origin, criteria: { minRating, minReviews, radiusKm, sort } };

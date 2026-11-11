@@ -408,10 +408,11 @@
     <p class="search-intro">好きなジャンルと条件を選んで、近くのお店を検索。</p>
     <form id="restaurantSearchForm">
       <fieldset class="genre-fieldset">
-        <legend>1. ジャンルを選ぶ</legend>
+        <legend>1. ジャンルを選ぶ（複数選択できます）</legend>
         <div id="genreGrid" class="genre-grid"></div>
-        <label class="free-genre-label" for="genreInput">検索するジャンル・店名（編集できます）</label>
-        <input id="genreInput" name="genre" type="text" maxlength="80" placeholder="例：そば、ハンバーグ" autocomplete="off" required>
+        <label class="free-genre-label" for="genreInput">追加のジャンル・店名（任意）</label>
+        <input id="genreInput" name="genre" type="text" maxlength="80" placeholder="例：そば（入力は1ジャンル分）" autocomplete="off">
+        <p id="genreSelectionSummary" class="genre-selection-summary" aria-live="polite"></p>
       </fieldset>
       <fieldset class="filter-fieldset">
         <legend>2. お店の条件</legend>
@@ -439,9 +440,9 @@
             <select id="radiusKm" name="radiusKm">
               <option value="0.1">100m以内</option>
               <option value="0.5">500m以内</option>
-              <option value="1">1km以内</option>
+              <option value="1" selected>1km以内</option>
               <option value="3">3km以内</option>
-              <option value="5" selected>5km以内</option>
+              <option value="5">5km以内</option>
               <option value="10">10km以内</option>
             </select>
           </label>
@@ -460,8 +461,9 @@
     <div id="searchStatus" class="search-status" role="status" aria-live="polite"></div>
     <section id="searchResults" aria-labelledby="resultsTitle" hidden>
       <div class="results-heading"><h3 id="resultsTitle"></h3><span class="google-attribution" translate="no">Google Maps</span></div>
+      <p id="resultGenres" class="search-hint"></p>
       <p id="resultCriteria" class="search-hint"></p>
-      <p class="search-hint">取得できた候補の中から、条件に合うお店を最大10件表示します。</p>
+      <p class="search-hint">検索したジャンル全体から、条件に合うお店を最大10件表示します。「検索ジャンル」は検索に使った言葉で、お店の公式カテゴリではありません。</p>
       <ol id="restaurantList" class="restaurant-list"></ol>
       <a id="shortlistLink" class="primary-action shortlist-link" target="_blank" rel="noopener noreferrer" hidden>候補店をまとめてGoogleマップで開く</a>
     </section>

@@ -7,7 +7,7 @@
   'use strict';
 
   const EARTH_KM = 6371.0088;
-  const DEFAULTS = Object.freeze({ minRating: 4, minReviews: 100, radiusKm: 5, sort: 'rating' });
+  const DEFAULTS = Object.freeze({ minRating: 4, minReviews: 100, radiusKm: 1, sort: 'rating' });
   const aliases = Object.freeze({ 'マック': 'マクドナルド', 'パン': 'パン屋', '弁当': '弁当屋', '丼もの': '丼もの' });
   const rad = value => value * Math.PI / 180;
   const deg = value => value * 180 / Math.PI;
@@ -84,8 +84,23 @@
     return Object.hasOwn(aliases, name) ? aliases[name] : name;
   }
 
+  function normalizeGenres(genres) {
+    const seen = new Set();
+    return (Array.isArray(genres) ? genres : []).flatMap(value => {
+      if (typeof value !== 'string') return [];
+      const name = value.trim().slice(0, 80);
+      const query = genreQuery(name);
+      if (!query || seen.has(query)) return [];
+      seen.add(query);
+      return [name];
+    });
+  }
+
   function buildSearchUrl(genre, origin) {
-    const term = genreQuery(genre) || '飲食店';
+    // Each genre has its own length limit; never truncate a joined batch.
+    const term = (Array.isArray(genre)
+      ? normalizeGenres(genre).map(genreQuery).join(' または ')
+      : genreQuery(genre)) || '飲食店';
     const center = coordinates(origin);
     const query = center ? `${term} near ${center.lat},${center.lng}` : `${term} 近く`;
     return `https://www.google.com/maps/search/?${new URLSearchParams({ api: '1', query })}`;
@@ -114,7 +129,7 @@
     });
   }
 
-  function filterPlaces(places, origin, criteria) {
+  function filterPlaces(places, origin, criteria, maxResults = 10) {
     const center = coordinates(origin);
     if (!center || !Array.isArray(places)) return [];
     const filters = normalizeCriteria(criteria);
@@ -138,16 +153,45 @@
       seen.add(id);
       results.push({ id, name, rating, reviewCount, distanceKm: distance, mapsUrl: buildPlaceUrl(id, name), attributions: normalizeAttributions(place.attributions) });
     }
+    return sortPlaces(results, filters.sort).slice(0, maxResults === 20 ? 20 : 10);
+  }
+
+  function sortPlaces(places, sort) {
     const tie = (a, b) => a.name.localeCompare(b.name, 'ja') || a.id.localeCompare(b.id);
     const ratingOrder = (a, b) => (b.rating ?? -1) - (a.rating ?? -1);
     const reviewOrder = (a, b) => (b.reviewCount ?? -1) - (a.reviewCount ?? -1);
     const byRating = (a, b) => ratingOrder(a, b) || reviewOrder(a, b) || a.distanceKm - b.distanceKm || tie(a, b);
     const byReviews = (a, b) => reviewOrder(a, b) || ratingOrder(a, b) || a.distanceKm - b.distanceKm || tie(a, b);
     const byDistance = (a, b) => a.distanceKm - b.distanceKm || ratingOrder(a, b) || reviewOrder(a, b) || tie(a, b);
-    results.sort(filters.sort === 'reviews' ? byReviews : filters.sort === 'distance' ? byDistance : byRating);
-    return results.slice(0, 10);
+    return places.sort(sort === 'reviews' ? byReviews : sort === 'distance' ? byDistance : byRating);
   }
 
-  return Object.freeze({ DEFAULTS, normalizeCriteria, formatDistance, describeCriteria, coordinates, distanceKm, boundsForRadius, genreQuery, filterPlaces, buildSearchUrl, buildShortlistUrl });
+  // Genres describe the search that found a place, not Google's official type.
+  // Merge all matching candidates before the final top ten so duplicate labels
+  // and provider attribution are retained even beyond one genre's first ten.
+  function mergeGenreResults(groups, criteria) {
+    const merged = new Map();
+    for (const group of Array.isArray(groups) ? groups : []) {
+      const genre = normalizeGenres([group?.genre])[0];
+      if (!genre || !Array.isArray(group.places)) continue;
+      for (const place of group.places) {
+        if (!place || typeof place.id !== 'string' || !place.id || typeof place.name !== 'string') continue;
+        const previous = merged.get(place.id);
+        if (previous) {
+          previous.genres = normalizeGenres([...previous.genres, genre]);
+          const seen = new Set(previous.attributions.map(source => JSON.stringify([source.provider, source.providerURI])));
+          for (const source of normalizeAttributions(place.attributions)) {
+            const key = JSON.stringify([source.provider, source.providerURI]);
+            if (!seen.has(key)) { previous.attributions.push(source); seen.add(key); }
+          }
+        } else {
+          merged.set(place.id, { ...place, genres: [genre], attributions: normalizeAttributions(place.attributions) });
+        }
+      }
+    }
+    return sortPlaces([...merged.values()], normalizeCriteria(criteria).sort).slice(0, 10);
+  }
+
+  return Object.freeze({ DEFAULTS, normalizeCriteria, formatDistance, describeCriteria, coordinates, distanceKm, boundsForRadius, genreQuery, normalizeGenres, filterPlaces, mergeGenreResults, buildSearchUrl, buildShortlistUrl });
 });
 
