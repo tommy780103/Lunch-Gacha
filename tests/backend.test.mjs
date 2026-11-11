@@ -183,7 +183,7 @@ test('fixed Google request has narrow fields, one page, strict location restrict
   const result = await executeSearch(input, env, { storage, now, fetchImpl: async (url, init) => {
     calls++;
     assert.equal(url, GOOGLE_ENDPOINT);
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     assert.equal(init.method, 'POST');
     assert.equal(init.headers['X-Goog-FieldMask'], GOOGLE_FIELDS);
     assert.equal(init.headers['X-Goog-Api-Key'], env.GOOGLE_PLACES_API_KEY);
@@ -203,6 +203,30 @@ test('fixed Google request has narrow fields, one page, strict location restrict
   assert.deepEqual(result.places[0].location, input.origin);
   assert.deepEqual(result.places[0].attributions, [{ provider: '提供元', providerURI: 'https://example.com/provider' }]);
   assert.equal(result.nextPageToken, undefined);
+});
+
+test('Google redirects fail without following Location or refunding the reservation', async () => {
+  for (const status of [301, 302, 303, 307, 308]) {
+    const storage = new MemoryStorage();
+    const calls = [];
+    const result = await handleQuotaRequest(request(), env, {
+      storage, now, fetchImpl: async (url, init) => {
+        calls.push(url);
+        assert.equal(url, GOOGLE_ENDPOINT);
+        assert.equal(init.redirect, 'manual');
+        return new Response(null, { status, headers: { Location: 'https://redirect.example/collect' } });
+      }
+    });
+    assert.equal(result.status, 502);
+    assert.equal(result.headers.get('Location'), null);
+    assert.deepEqual(await result.json(), {
+      error: { code: 'REQUEST_FAILED', message: 'お店情報を取得できませんでした。' },
+      quota: { dayUsed: 1, dayLimit: 20, monthUsed: 1, monthLimit: 600 }
+    });
+    assert.deepEqual(calls, [GOOGLE_ENDPOINT]);
+    assert.equal(storage.state.dayUsed, 1);
+    assert.equal(storage.state.monthUsed, 1);
+  }
 });
 
 test('bad input and client key/quota/endpoint/object/field overrides are rejected', () => {
@@ -288,3 +312,4 @@ test('rectangle remains valid across the date line and at the poles', () => {
   }
   assert.equal(googleSearchBody(validateSearchInput({ ...input, genre: 'constructor' })).textQuery, 'constructor 飲食店');
 });
+

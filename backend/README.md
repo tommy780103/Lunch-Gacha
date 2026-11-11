@@ -1,9 +1,9 @@
 # お店検索 API と共有利用上限
 
-画面の静的資産と検索 API を同じ Cloudflare Worker から配信し、Google Places API (New) はサーバーからだけ呼び出します。1 つの SQLite Durable Object に全ユーザー共通の利用回数を保存し、**1 日 20 回・1 か月 600 回**で Google へのリクエストを止めます。初期設定では検索が無効のため Google を呼びません。
+画面の静的資産と検索 API を同じ Cloudflare Worker から配信し、Google Places API (New) はサーバーからだけ呼び出します。1 つの SQLite Durable Object に全ユーザー共通の利用回数を保存し、**1 日 20 回・1 か月 600 回**で Google へのリクエストを止めます。現在のコードは検索を有効にする構成です。キー未登録、上限到達、カウンター保存障害の場合はGoogleを呼びません。
 
 ```toml
-SEARCH_ENABLED = "false"
+SEARCH_ENABLED = "true"
 ```
 
 ## 本人限定のアクセス設定
@@ -26,6 +26,12 @@ node scripts/build-worker-assets.mjs
 ```
 
 ## 初回設定
+
+新しい環境を準備する間はサーバーを次の設定にし、画面側の検索も無効にしておきます。既存環境で検索を停止する場合も、この設定へ戻して再デプロイします。Durable Objectと保存済みカウンターは維持してください。
+
+```toml
+SEARCH_ENABLED = "false"
+```
 
 1. Google Cloud で Places API (New) と請求先を設定します。検索に評価・口コミ件数を含めるため、Text Search Enterprise の無料利用枠が対象です。利用前に[最新料金](https://developers.google.com/maps/billing-and-pricing/pricing)と同じ請求先アカウントの他プロジェクトの使用量を確認してください。
 2. このバックエンド専用の API キーを用意し、API の制限を Places API (New) のみにします。ブラウザー向け HTTP リファラー制限はサーバーからのリクエストには使いません。キーを HTML、GitHub、チャットに記載しないでください。

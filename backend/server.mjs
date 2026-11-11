@@ -69,8 +69,10 @@ export async function executeSearch(rawInput, env, { storage, fetchImpl = fetch,
   let timer;
   try {
     const operation = (async () => {
+      // Workers does not support redirect: 'error'. Keep redirects manual so
+      // the API key never follows a Location header; !response.ok rejects 3xx.
       const response = await fetchImpl(GOOGLE_ENDPOINT, {
-        method: 'POST', redirect: 'error', signal: controller.signal,
+        method: 'POST', redirect: 'manual', signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY,
@@ -152,3 +154,4 @@ export async function handlePublicRequest(request, env) {
   for (const [key, value] of Object.entries(cors)) headers.set(key, value);
   return new Response(response.body, { status: response.status, headers });
 }
+
