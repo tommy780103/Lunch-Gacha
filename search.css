@@ -8,7 +8,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 button:disabled { cursor: not-allowed; opacity: .55; }
 .search-panel { width: 100%; }
-.quota-panel { width: 100%; margin: 0 0 24px; padding: 16px; border: 1px solid #3b3b58; border-radius: 16px; background: #18182d; }
+.quota-panel { width: 100%; margin: 24px 0 0; padding: 16px; border: 1px solid #3b3b58; border-radius: 16px; background: #18182d; }
 .quota-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .quota-heading h2 { color: #e8e8f2; font-size: 14px; }
 .quota-heading button { min-height: 36px; padding: 7px 14px; color: #b9f1ec; background: #244342; border: 1px solid #3f807b; border-radius: 8px; cursor: pointer; }

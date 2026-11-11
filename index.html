@@ -348,30 +348,17 @@
 <body>
 
 <div class="app-header">
-  <h1>きょうめし</h1>
-  <p>まわして決める。選んで探す。</p>
+  <h1 id="appTitle">きょうめし</h1>
+  <p id="appSubtitle">まわして決める。選んで探す。</p>
 </div>
 
 <div class="tabs" aria-label="機能を選ぶ">
   <button class="tab active" data-tab="lunch" aria-pressed="true" onclick="switchTab('lunch')">ガチャ</button>
   <button class="tab" data-tab="search" aria-pressed="false" onclick="switchTab('search')">お店検索</button>
-  <button class="tab" data-tab="custom" aria-pressed="false" onclick="switchTab('custom')">カスタム</button>
+  <button class="tab" data-tab="custom" aria-pressed="false" onclick="switchTab('custom')">ルーレット</button>
 </div>
 
 <div class="container">
-  <section id="searchQuota" class="quota-panel" aria-labelledby="quotaTitle">
-    <div class="quota-heading">
-      <h2 id="quotaTitle">お店検索の利用回数</h2>
-      <button id="quotaRefreshBtn" type="button">更新</button>
-    </div>
-    <dl class="quota-cards" aria-live="polite" aria-atomic="true">
-      <div class="quota-card"><dt>今月の使用回数</dt><dd id="quotaMonthUsed">確認中…</dd><small>月600回まで</small></div>
-      <div class="quota-card quota-card-remaining"><dt>今月の残り</dt><dd id="quotaMonthRemaining">確認中…</dd><small>全利用者の合計</small></div>
-      <div class="quota-card quota-card-day"><dt>今日の残り</dt><dd id="quotaDayRemaining">確認中…</dd><small>1日20回まで</small></div>
-    </dl>
-    <p id="quotaStatus" class="quota-status" role="status">利用回数を確認中です。</p>
-    <p class="quota-note">失敗した検索も回数に含みます。日・月の切り替えは米国太平洋時間です。回数の更新では検索を消費しません。</p>
-  </section>
   <div id="gachaPanel" class="gacha-panel">
   <div class="wheel-wrapper">
     <div class="pointer"></div>
@@ -483,6 +470,19 @@
       <p>このリンクには、評価・口コミ件数の条件は適用されません。</p>
     </div>
   </section>
+  <section id="searchQuota" class="quota-panel" aria-labelledby="quotaTitle">
+    <div class="quota-heading">
+      <h2 id="quotaTitle">お店検索の利用回数</h2>
+      <button id="quotaRefreshBtn" type="button">更新</button>
+    </div>
+    <dl class="quota-cards" aria-live="polite" aria-atomic="true">
+      <div class="quota-card"><dt>今月の使用回数</dt><dd id="quotaMonthUsed">確認中…</dd><small>月600回まで</small></div>
+      <div class="quota-card quota-card-remaining"><dt>今月の残り</dt><dd id="quotaMonthRemaining">確認中…</dd><small>全利用者の合計</small></div>
+      <div class="quota-card quota-card-day"><dt>今日の残り</dt><dd id="quotaDayRemaining">確認中…</dd><small>1日20回まで</small></div>
+    </dl>
+    <p id="quotaStatus" class="quota-status" role="status">利用回数を確認中です。</p>
+    <p class="quota-note">失敗した検索も回数に含みます。日・月の切り替えは米国太平洋時間です。回数の更新では検索を消費しません。</p>
+  </section>
 </div>
 
 <footer class="app-footer"><a href="./privacy.html">プライバシー</a><span>・</span><a href="./terms.html">利用規約</a></footer>
@@ -516,6 +516,8 @@ let spinning = false;
 let currentAngle = 0;
 let userLat = null;
 let userLng = null;
+const defaultDocumentTitle = document.title;
+const defaultAppTitle = document.getElementById('appTitle').textContent;
 
 const canvas = document.getElementById('wheelCanvas');
 const ctx = canvas.getContext('2d');
@@ -572,8 +574,9 @@ function getLocation() {
 
 function drawWheel() {
   const n = items.length;
-  const arc = (2 * Math.PI) / n;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!n) return;
+  const arc = (2 * Math.PI) / n;
 
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.4)';
@@ -629,9 +632,7 @@ function spin() {
   stopRequested = false;
   document.getElementById('spinBtn').style.display = 'none';
   document.getElementById('stopBtn').style.display = 'inline-block';
-  document.getElementById('result').textContent = '';
-  document.getElementById('mapBtn').style.display = 'none';
-  document.getElementById('resultSearchBtn').hidden = true;
+  clearResult();
 
   spinSpeed = 0.15 + Math.random() * 0.05;
   let lastTime = performance.now();
@@ -686,7 +687,9 @@ function decelerate() {
 }
 
 function showResult() {
+  clearResult();
   const n = items.length;
+  if (n < 2) return;
   const arc = (2 * Math.PI) / n;
   const pointerAngle = Math.PI * 1.5;
   let normalizedAngle = (pointerAngle - currentAngle % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2);
@@ -700,6 +703,8 @@ function showResult() {
   resultEl.offsetHeight;
   resultEl.style.animation = 'pop .4s ease';
 
+  // Generic roulette results are item names only, with no food-search action.
+  if (currentTab !== 'lunch') return;
   const mapBtn = document.getElementById('mapBtn');
   mapBtn.href = LunchSearchCore.buildSearchUrl(chosen, userLat !== null ? { lat: userLat, lng: userLng } : null);
   mapBtn.style.display = 'inline-block';
@@ -710,6 +715,16 @@ function showResult() {
     LunchSearchUI.chooseGenre(chosen);
     switchTab('search');
   };
+}
+
+function clearResult() {
+  document.getElementById('result').textContent = '';
+  const mapBtn = document.getElementById('mapBtn');
+  mapBtn.style.display = 'none';
+  mapBtn.removeAttribute('href');
+  const searchBtn = document.getElementById('resultSearchBtn');
+  searchBtn.hidden = true;
+  searchBtn.onclick = null;
 }
 
 function setGachaBusy(busy) {
@@ -771,24 +786,25 @@ function toggleAll(state) {
 function updateLunchItems() {
   const selected = allLunchItems.filter(name => lunchSelected[name]);
   const warn = document.getElementById('warnMsg');
-  if (selected.length < 2) {
-    warn.textContent = '2つ以上選んでください';
-    document.getElementById('spinBtn').disabled = true;
-    return;
-  }
-  warn.textContent = '';
-  items = selected;
+  const valid = selected.length >= 2;
+  warn.textContent = valid ? '' : '2つ以上選んでください';
+  document.getElementById('spinBtn').disabled = !valid;
+  items = valid ? selected : [];
   currentAngle = 0;
-  document.getElementById('result').textContent = '';
-  document.getElementById('mapBtn').style.display = 'none';
-  document.getElementById('resultSearchBtn').hidden = true;
-  document.getElementById('spinBtn').disabled = false;
+  clearResult();
   drawWheel();
 }
 
 function switchTab(tab) {
   if (spinning) return;
   currentTab = tab;
+  const roulette = tab === 'custom';
+  document.getElementById('appTitle').textContent = roulette ? 'ルーレット' : defaultAppTitle;
+  document.getElementById('appSubtitle').hidden = roulette;
+  document.title = roulette ? 'ルーレット' : defaultDocumentTitle;
+  document.getElementById('searchQuota').hidden = roulette;
+  document.getElementById('locationStatus').hidden = roulette;
+  clearResult();
   document.querySelectorAll('.tab').forEach(button => {
     const active = button.dataset.tab === tab;
     button.classList.toggle('active', active);
@@ -801,9 +817,6 @@ function switchTab(tab) {
   document.getElementById('customArea').style.display = tab === 'custom' ? 'block' : 'none';
   if (tab === 'lunch') updateLunchItems();
   else applyCustom();
-  document.getElementById('result').textContent = '';
-  document.getElementById('mapBtn').style.display = 'none';
-  document.getElementById('resultSearchBtn').hidden = true;
   currentAngle = 0;
   resizeCanvas();
 }
@@ -815,14 +828,10 @@ function applyCustom() {
   const valid = lines.length >= 2;
   document.getElementById('spinBtn').disabled = !valid;
   document.getElementById('customWarn').textContent = valid ? '' : '2つ以上の項目を入力してください';
-  if (valid) {
-    items = lines;
-    currentAngle = 0;
-    document.getElementById('result').textContent = '';
-    document.getElementById('mapBtn').style.display = 'none';
-    document.getElementById('resultSearchBtn').hidden = true;
-    drawWheel();
-  }
+  items = valid ? lines : [];
+  currentAngle = 0;
+  clearResult();
+  drawWheel();
 }
 
 // 初期化
