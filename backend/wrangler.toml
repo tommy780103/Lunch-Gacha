@@ -2,9 +2,14 @@ name = "lunch-gacha-search"
 main = "worker.mjs"
 compatibility_date = "2026-11-11"
 workers_dev = true
+preview_urls = false
+
+[assets]
+directory = "../public"
+run_worker_first = ["/search"]
 
 [vars]
-ALLOWED_ORIGIN = "https://tommy780103.github.io"
+ALLOWED_ORIGIN = "https://lunch-gacha-search.choi-tool.workers.dev"
 # Enable only after setting the secret and verifying the account's free usage.
 SEARCH_ENABLED = "false"
 
@@ -15,3 +20,4 @@ class_name = "SearchQuota"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SearchQuota"]
+

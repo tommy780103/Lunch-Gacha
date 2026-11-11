@@ -1,12 +1,13 @@
 # ランチガチャ
 
-今日の食事をルーレットで選ぶ Web アプリです。画面はビルド不要で GitHub Pages に公開します。ジャンルを直接選び、評価・口コミ件数・現在地からの距離でお店を探すこともできます。
+今日の食事をルーレットで選ぶ Web アプリです。画面と検索 API を同じ Cloudflare Worker から配信し、Cloudflare Access で本人のメールアドレスだけを許可する構成です。ジャンルを直接選び、評価・口コミ件数・現在地からの距離でお店を探すこともできます。
 
-[公開サイト](https://tommy780103.github.io/Lunch-Gacha/)
+[本人用サイト](https://lunch-gacha-search.choi-tool.workers.dev/)
 
 ## 構成
 
 - メイン画面・スタイル・ルーレット：ルートの HTML。
+- 配信資産：専用スクリプトが画面に必要な13ファイルだけを生成先へコピーします。バックエンド・文書・秘密情報は配信対象に含めません。
 - 店舗検索：ブラウザから Cloudflare Workers を経由して Google Places API (New) を呼び出します。
 - 共通の利用上限：SQLite Durable Object で全利用者の合計を管理します。
 - 公開設定：`config.js` に検索サーバーの URL を設定します。初期状態は店舗検索無効です。API キーはサーバーの Secret にだけ保存します。
@@ -34,6 +35,8 @@ icons/icon-192.png
 icons/icon-512.png
 icons/favicon.png
 scripts/generate_icons.py
+scripts/build-worker-assets.mjs
+public/                  # 配信用の生成物。Gitには含めません
 _docs/
 ```
 
@@ -73,6 +76,26 @@ iPhone では Safari で公開サイトを開き、「共有」から「ホー�
 node --test tests/*.test.cjs tests/backend.test.mjs
 ```
 
+## 本人限定で配信する
+
+Cloudflare Workers の対象 Worker で Access の保護範囲を「All traffic」にし、Allow ポリシーの Emails には本人のメールアドレス1件だけを登録します。メールドメイン全体・Everyone・Bypass は許可しません。メールアドレスや認証情報は公開コードに記載せず、Cloudflare側で管理します。[Worker単位のAccess設定](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)を参照してください。
+
+トップページ・画像・JavaScript・検索 API のすべてがログインを要求することを確認します。以前の GitHub Pages はリポジトリの Pages 設定で公開を停止し、旧URLから画面を開けないことも確認してください。リポジトリのソース公開と、利用サイトのアクセス制限は別の設定です。
+
+デプロイ前に次のコマンドで静的資産を生成します。画面や設定を変更した場合も、必ず再実行して生成物を更新してください。スクリプトは自身の配置場所を基準に入出力を解決します。
+
+```sh
+node scripts/build-worker-assets.mjs
+```
+
+生成後に同じ Worker をデプロイします。Worker や Durable Object を作り直さず、既存の共有カウンターを維持します。
+
+```sh
+npx wrangler@4.160.0 deploy --config backend/wrangler.toml
+```
+
+画面側の検索通信は同じオリジンにだけ認証Cookieを送信します。認証の有効期限が切れた場合はページを開き直して再ログインしてください。検索機能の有効化は、Access の設定とは別に下記の手順で行います。
+
 ## お店の検索
 
 - ガチャで選ばれた料理から検索する方法と、ジャンルを直接選ぶ方法があります。既存の 13 ジャンルに加えて、任意の料理・ジャンル名も入力できます。
@@ -97,15 +120,25 @@ window.LUNCH_GACHA_CONFIG = Object.freeze({
 1. [Google Cloud Console](https://console.cloud.google.com/)でこのアプリ用のプロジェクトを用意し、[課金アカウント](https://console.cloud.google.com/billing)を設定して [**Places API (New)**](https://console.cloud.google.com/apis/library/places.googleapis.com) を有効にします。各画面で選択中のプロジェクトを確認してください。
 2. [認証情報](https://console.cloud.google.com/apis/credentials)からサーバー用 API キーを作成し、API の制限を **Places API (New) だけ**に限定します。Cloudflare のサーバーから呼び出すため、ブラウザ用のウェブサイト制限は使用しません。API キーを `config.js`、HTML、GitHub に書かないでください。
 3. Google の料金と同じ課金アカウントの利用を確認します。評価・口コミ件数を含む検索は **Text Search Enterprise** に該当し、2026 年 11 月 11 日に確認した無料枠は月 1,000 リクエストです。このアプリは月 600 回で止めますが、他のアプリ・プロジェクトの同じ料金区分の利用も合算されます。[割り当てとシステム上限](https://console.cloud.google.com/iam-admin/quotas)で設定可能な上限も確認してください。
-4. [Cloudflare ダッシュボード](https://dash.cloudflare.com/)で **Workers Free プラン**を用意し、[サーバー設定手順](./backend/README.md)に従ってログインします。`backend/wrangler.toml` の `ALLOWED_ORIGIN` を画面のオリジンに合わせます。公開サイトの初期値は `https://tommy780103.github.io` です。
+4. [Cloudflare ダッシュボード](https://dash.cloudflare.com/)で **Workers Free プラン**を用意し、[サーバー設定手順](./backend/README.md)に従ってログインします。画面と検索 API を同じ Worker から配信し、許可OriginをそのHTTPSオリジンに合わせます。本人限定の Access 設定と、旧 GitHub Pages の公開停止を先に確認してください。
 5. Google のキーを Cloudflare の Secret `GOOGLE_PLACES_API_KEY` に登録し、Worker をデプロイします。キー・無料枠・設定を確認後、`SEARCH_ENABLED` を `"true"` にして再デプロイします。
-6. 発行された検索 URL（例：`https://<worker>.workers.dev/search`）を `config.js` の `searchEndpoint` に設定し、`placesEnabled` を `true` にします。実際の検索・利用数・上限時の案内を確認します。
+6. 同じ Worker の検索 URL を画面側の設定に登録して有効化し、再デプロイします。実際の検索・利用数・上限時の案内を確認します。初期設定は無効のままです。
+
+```text
+https://lunch-gacha-search.choi-tool.workers.dev/search
+```
 
 リポジトリのルートで使う主なコマンドは次のとおりです。Secret の入力欄にキーを入力します。
 
 ```sh
 npx wrangler@4.160.0 login
+```
+
+```sh
 npx wrangler@4.160.0 deploy --config backend/wrangler.toml
+```
+
+```sh
 npx wrangler@4.160.0 secret put GOOGLE_PLACES_API_KEY --config backend/wrangler.toml
 ```
 
@@ -121,7 +154,7 @@ Cloudflare Workers と SQLite Durable Objects は Free プランの範囲で利�
 
 ### 設定・検証の状況
 
-Google Cloud の課金設定・API キー・割り当て設定、Cloudflare へのサーバー公開は、この実装時点では未完了または未確認です。`config.js` とサーバー設定は無効のままです。実店舗データによる検索は未実施です。API を利用しない検証結果は [実装記録](./_docs/2026-11-11_restaurant-search.md) に記載します。
+画面側とサーバー側の検索設定は無効のままです。Google側のキー制限・請求先の利用量・割り当てと実店舗データによる検索は、有効化時に確認します。Cloudflare Access と GitHub Pages の公開停止はリポジトリ外の設定なので、コードのデプロイだけで完了したとは判断しません。API を利用しない検証結果は [実装記録](./_docs/2026-11-11_restaurant-search.md) を参照してください。
 
 ### 公式資料
 
@@ -135,3 +168,5 @@ Google Cloud の課金設定・API キー・割り当て設定、Cloudflare へ�
 - [Cloudflare Durable Objects の料金・無料枠](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 - [Cloudflare Workers の利用上限](https://developers.cloudflare.com/workers/platform/limits/)
 - [Cloudflare の Secret 設定](https://developers.cloudflare.com/workers/configuration/secrets/)
+- [Worker 単位の Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
+

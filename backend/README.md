@@ -1,6 +1,29 @@
 # お店検索 API と共有利用上限
 
-GitHub Pages の画面から Google Places API (New) を直接呼ばず、この Cloudflare Worker を経由します。1 つの SQLite Durable Object に全ユーザー共通の利用回数を保存し、**1 日 20 回・1 か月 600 回**で Google へのリクエストを止めます。初期設定では `SEARCH_ENABLED = "false"` のため Google を呼びません。
+画面の静的資産と検索 API を同じ Cloudflare Worker から配信し、Google Places API (New) はサーバーからだけ呼び出します。1 つの SQLite Durable Object に全ユーザー共通の利用回数を保存し、**1 日 20 回・1 か月 600 回**で Google へのリクエストを止めます。初期設定では検索が無効のため Google を呼びません。
+
+```toml
+SEARCH_ENABLED = "false"
+```
+
+## 本人限定のアクセス設定
+
+Worker単位のCloudflare Accessを「All traffic」で設定し、本人メール1件だけをAllowにします。本番URL、静的資産、検索APIをまとめて保護します。メールアドレスや認証方式はCloudflare側で管理し、コードには埋め込みません。不要なプレビューURLは設定ファイルで無効にします。アカウント全体や他のWorkerのAccess設定は変更しません。
+
+旧GitHub Pagesの公開を停止し、新しいサイトのトップページ・静的資産・検索APIのすべてが未認証で拒否されることを確認してください。CORSのOrigin制限だけでは本人限定にはなりません。[公式のWorker向けAccess手順](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)を参照してください。
+
+画面の公開先と検索API：
+
+```text
+https://lunch-gacha-search.choi-tool.workers.dev/
+https://lunch-gacha-search.choi-tool.workers.dev/search
+```
+
+静的資産はビルドスクリプトが13ファイルの許可リストから生成します。画面や設定の変更後、デプロイ前に次のコマンドを必ず実行してください。Wranglerは生成済みの資産だけをアップロードします。
+
+```sh
+node scripts/build-worker-assets.mjs
+```
 
 ## 初回設定
 
@@ -11,7 +34,13 @@ GitHub Pages の画面から Google Places API (New) を直接呼ばず、この
 
 ```sh
 npx wrangler@4.160.0 login
+```
+
+```sh
 npx wrangler@4.160.0 deploy --config backend/wrangler.toml
+```
+
+```sh
 npx wrangler@4.160.0 secret put GOOGLE_PLACES_API_KEY --config backend/wrangler.toml
 ```
 
@@ -24,7 +53,7 @@ npx wrangler@4.160.0 secret put GOOGLE_PLACES_API_KEY --config backend/wrangler.
 npx wrangler@4.160.0 deploy --config backend/wrangler.toml
 ```
 
-7. デプロイ後の `https://lunch-gacha-search.<アカウント>.workers.dev/search` を、フロントエンドの公開 API URL 設定に登録します。画面の公開元が変わる場合は `ALLOWED_ORIGIN` も正確な HTTPS オリジンに更新します。GitHub Pages のパスは含めません。
+7. 同じWorkerの検索APIの絶対HTTPS URLを画面側の設定に登録して有効化し、再デプロイします。許可OriginもそのWorkerのHTTPSオリジンに合わせます。画面からの検索では同じオリジンにだけAccessの認証Cookieを送信し、別オリジンへのCookie送信は許可しません。
 
 ## 上限の保証範囲
 
@@ -34,7 +63,7 @@ npx wrangler@4.160.0 deploy --config backend/wrangler.toml
 - 状態が不正、ストレージが利用不能、キー未登録、検索無効の場合は Google を呼びません。検索結果は保存・キャッシュしません。
 - 日 20 回と月 600 回はサーバーコードに固定してあります。クライアントから変更できません。回数をリセットする API もありません。
 - **600 回はこのアプリからの呼び出しだけの上限です。** Google の無料枠は請求先アカウントの他プロジェクトと合算されるため、他での利用や将来の料金改定まで含めた請求額 0 円を保証するものではありません。
-- `ALLOWED_ORIGIN` はブラウザーの CORS 制限であり、認証ではありません。第三者が Origin を偽装して枠を消費する可能性はありますが、共有上限を超えて Google を呼ぶことはありません。
+- Originの照合はブラウザーの CORS 制限であり、認証ではありません。本人限定の認証はWorker単位のCloudflare Accessで実施します。認証後のリクエストにも、共有上限を適用します。
 
 **同じ月の途中で Durable Object の名前・クラス・バインディング・Worker を作り直したり、保存済み状態を削除したりしないでください。** 初回の未作成状態と管理者によるデータ削除は区別できません。新しいオブジェクトを作ると使用済み回数を引き継げないため、無効にしたまま次の請求月を待つか、使用済み回数を保つ管理用移行が必要です。通常のコード更新では既存のオブジェクトを維持します。別環境で有効にすると別カウンターになるため、このキーで並行稼働させないでください。
 
@@ -76,9 +105,13 @@ Google では最小評価を 0.5 刻みに切り下げて検索し、最大 20 �
 
 ```sh
 node --test tests/backend.test.mjs
+```
+
+```sh
 npx wrangler@4.160.0 deploy --dry-run --config backend/wrangler.toml
 ```
 
 テストはモックの Google 応答とトランザクションストレージを使い、実 API を呼びません。並列リクエスト、日・月上限、夏時間を含む期間更新、再起動後の回数、失敗時の消費、保存失敗時の停止、クライアントによる設定上書き拒否、サイズ不明のストリーム本文の制限を確認します。実際のキーによる疎通は初回設定後に必要で、1 回分を消費します。
 
 参照: [Text Search (New)](https://developers.google.com/maps/documentation/places/web-service/text-search)、[SQLite Durable Object Storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/)、[Google Maps 利用上限管理](https://developers.google.com/maps/billing-and-pricing/manage-costs)
+

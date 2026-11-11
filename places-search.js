@@ -76,7 +76,9 @@
         const response = await root.fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          credentials: 'omit',
+          // Send the Access session cookie only to this page's own origin.
+          // A separately configured origin never receives browser credentials.
+          credentials: 'same-origin',
           cache: 'no-store',
           redirect: 'error',
           referrerPolicy: 'no-referrer',
@@ -107,3 +109,4 @@
 
   root.LunchPlaces = Object.freeze({ search, isConfigured, getQuota });
 })(typeof window !== 'undefined' ? window : globalThis);
+

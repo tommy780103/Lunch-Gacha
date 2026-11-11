@@ -168,8 +168,9 @@ test('local HTTP development requires the exact same localhost origin', async ()
   }
 });
 
-test('one explicit search sends one credential-free proxy POST and filters exact thresholds', async () => {
+test('one explicit search uses only same-origin credentials and filters exact thresholds', async () => {
   const harness = adapterHarness({
+    page: 'https://lunch.example.workers.dev/',
     config: { searchEndpoint: 'https://lunch.example.workers.dev/search', placesEnabled: true, googleMapsApiKey: 'legacy-secret-must-not-be-sent' },
     fetch: () => response({ places: [place('pass'), place('low', { rating: 4.1 }), place('few', { userRatingCount: 99 })], quota: quota() })
   });
@@ -181,7 +182,7 @@ test('one explicit search sends one credential-free proxy POST and filters exact
   const { url, options } = harness.requests[0];
   assert.equal(url, 'https://lunch.example.workers.dev/search');
   assert.equal(options.method, 'POST');
-  assert.equal(options.credentials, 'omit');
+  assert.equal(options.credentials, 'same-origin');
   assert.equal(options.cache, 'no-store');
   assert.equal(options.redirect, 'error');
   assert.equal(options.referrerPolicy, 'no-referrer');
@@ -193,6 +194,13 @@ test('one explicit search sends one credential-free proxy POST and filters exact
   const exposed = harness.api.getQuota();
   exposed.dayUsed = 999;
   assert.equal(harness.api.getQuota().dayUsed, 1, 'callers cannot mutate the cached count');
+
+  const crossOrigin = adapterHarness({ page: 'https://other.example/' });
+  await crossOrigin.api.search('うどん', origin, {});
+  const crossRequest = crossOrigin.requests[0];
+  assert.notEqual(new URL(crossRequest.url).origin, crossOrigin.root.location.origin);
+  assert.equal(crossRequest.options.credentials, 'same-origin', 'never opt into cross-origin cookies');
+  assert.equal(Object.keys(crossRequest.options.headers).some(name => /^(authorization|cookie)$/i.test(name)), false);
 });
 
 test('invalid input never consumes a request, and empty filtered results stay empty', async () => {
@@ -288,3 +296,4 @@ test('timeout aborts the request after 25 seconds and late responses cannot over
   assert.equal(harness.requests.length, 2);
   assert.equal(timers.size, 0);
 });
+
