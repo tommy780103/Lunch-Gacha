@@ -10,6 +10,7 @@
 <link rel="icon" type="image/png" sizes="48x48" href="./icons/favicon.png">
 <link rel="icon" type="image/svg+xml" href="./icons/app-icon.svg">
 <title>ランチガチャ - 今日なに食べる？</title>
+<link rel="stylesheet" href="./search.css">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { -webkit-text-size-adjust: 100%; }
@@ -348,15 +349,17 @@
 
 <div class="app-header">
   <h1>ランチガチャ</h1>
-  <p>迷ったらまわせ。近くのお店まで案内します。</p>
+  <p>まわして決める。選んで探す。今日のおいしい一軒へ。</p>
 </div>
 
-<div class="tabs">
-  <button class="tab active" onclick="switchTab('lunch')">ランチ</button>
-  <button class="tab" onclick="switchTab('custom')">カスタム</button>
+<div class="tabs" aria-label="機能を選ぶ">
+  <button class="tab active" data-tab="lunch" aria-pressed="true" onclick="switchTab('lunch')">ガチャ</button>
+  <button class="tab" data-tab="search" aria-pressed="false" onclick="switchTab('search')">お店検索</button>
+  <button class="tab" data-tab="custom" aria-pressed="false" onclick="switchTab('custom')">カスタム</button>
 </div>
 
 <div class="container">
+  <div id="gachaPanel" class="gacha-panel">
   <div class="wheel-wrapper">
     <div class="pointer"></div>
     <canvas id="wheelCanvas" width="340" height="340"></canvas>
@@ -367,8 +370,9 @@
   </div>
 
   <div class="result-area">
-    <div class="result-text" id="result"></div>
-    <a class="map-btn" id="mapBtn" target="_blank" rel="noopener">Google Maps で近くのお店を探す</a>
+    <div class="result-text" id="result" aria-live="polite"></div>
+    <button id="resultSearchBtn" class="primary-action" hidden>このジャンルでお店を探す</button>
+    <a class="map-btn" id="mapBtn" target="_blank" rel="noopener noreferrer">通常のGoogleマップ検索</a>
     <div class="location-status" id="locationStatus"></div>
   </div>
 
@@ -394,8 +398,80 @@
 項目2
 項目3</textarea>
     <button class="apply-btn" onclick="applyCustom()">反映する</button>
+    <p id="customWarn" class="warn-msg" aria-live="polite"></p>
   </div>
+  </div>
+
+  <section id="searchPanel" class="search-panel" aria-labelledby="searchTitle" hidden>
+    <p class="eyebrow">今日の気分から</p>
+    <h2 id="searchTitle">評判のお店を探す</h2>
+    <p class="search-intro">好きなジャンルと条件を選んで、近くのお店を検索。</p>
+    <form id="restaurantSearchForm">
+      <fieldset class="genre-fieldset">
+        <legend>1. ジャンルを選ぶ</legend>
+        <div id="genreGrid" class="genre-grid"></div>
+        <label class="free-genre-label" for="genreInput">検索するジャンル・店名（編集できます）</label>
+        <input id="genreInput" name="genre" type="text" maxlength="80" placeholder="例：そば、ハンバーグ" autocomplete="off" required>
+      </fieldset>
+      <fieldset class="filter-fieldset">
+        <legend>2. お店の条件</legend>
+        <div class="filter-grid">
+          <label for="minRating">評価
+            <select id="minRating" name="minRating">
+              <option value="4" selected>★4.0以上</option>
+              <option value="4.2">★4.2以上</option>
+              <option value="4.5">★4.5以上</option>
+            </select>
+          </label>
+          <label for="minReviews">口コミ件数
+            <select id="minReviews" name="minReviews">
+              <option value="50">50件以上</option>
+              <option value="100" selected>100件以上</option>
+              <option value="300">300件以上</option>
+              <option value="500">500件以上</option>
+            </select>
+          </label>
+          <label for="radiusKm">現在地からの距離
+            <select id="radiusKm" name="radiusKm">
+              <option value="1">1km以内</option>
+              <option value="3">3km以内</option>
+              <option value="5" selected>5km以内</option>
+              <option value="10">10km以内</option>
+            </select>
+          </label>
+          <label for="sortOrder">並び順
+            <select id="sortOrder" name="sortOrder">
+              <option value="rating">評価が高い順</option>
+              <option value="reviews">口コミが多い順</option>
+              <option value="distance">近い順</option>
+            </select>
+          </label>
+        </div>
+      </fieldset>
+      <button id="searchBtn" class="primary-action" type="submit">この条件でお店を検索</button>
+      <p class="search-hint">検索時に現在地を使用します。距離は直線距離です。</p>
+    </form>
+    <div id="searchStatus" class="search-status" role="status" aria-live="polite"></div>
+    <section id="searchResults" aria-labelledby="resultsTitle" hidden>
+      <div class="results-heading"><h3 id="resultsTitle"></h3><span class="google-attribution" translate="no">Google Maps</span></div>
+      <p id="resultCriteria" class="search-hint"></p>
+      <p class="search-hint">取得できた候補の中から、条件に合うお店を最大10件表示します。</p>
+      <ol id="restaurantList" class="restaurant-list"></ol>
+      <a id="shortlistLink" class="primary-action shortlist-link" target="_blank" rel="noopener noreferrer" hidden>候補店をまとめてGoogleマップで開く</a>
+    </section>
+    <div class="normal-search">
+      <a id="normalSearchLink" target="_blank" rel="noopener noreferrer">通常のGoogleマップ検索を開く ↗</a>
+      <p>このリンクには、評価・口コミ件数の条件は適用されません。</p>
+    </div>
+  </section>
 </div>
+
+<footer class="app-footer"><a href="./privacy.html">プライバシー</a><span>・</span><a href="./terms.html">利用規約</a></footer>
+
+<script src="./config.js"></script>
+<script src="./search-core.js"></script>
+<script src="./places-search.js"></script>
+<script src="./search-ui.js"></script>
 
 <script>
 const LUNCH_ITEMS = [
@@ -429,6 +505,7 @@ let cx, cy, radius;
 function resizeCanvas() {
   const wrapper = canvas.parentElement;
   const size = Math.min(wrapper.clientWidth, 340);
+  if (size <= 0) return;
   const dpr = window.devicePixelRatio || 1;
   canvas.width = size * dpr;
   canvas.height = size * dpr;
@@ -443,29 +520,35 @@ function resizeCanvas() {
 
 window.addEventListener('resize', resizeCanvas);
 
-// 位置情報を取得
+// 現在地は検索操作時だけ取得し、画面を開いている間だけ保持する。
+let locationPromise = null;
 function getLocation() {
+  if (locationPromise) return locationPromise;
   const statusEl = document.getElementById('locationStatus');
-  if (!navigator.geolocation) {
-    statusEl.textContent = '位置情報に非対応のブラウザです';
-    statusEl.className = 'location-status ng';
-    return;
-  }
-  statusEl.textContent = '位置情報を取得中...';
-  statusEl.className = 'location-status';
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      userLat = pos.coords.latitude;
-      userLng = pos.coords.longitude;
-      statusEl.textContent = '現在地を取得しました';
-      statusEl.className = 'location-status ok';
-    },
-    () => {
-      statusEl.textContent = '位置情報を許可すると現在地付近で検索できます';
-      statusEl.className = 'location-status ng';
-    },
-    { enableHighAccuracy: true, timeout: 10000 }
-  );
+  locationPromise = new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(Object.assign(new Error('位置情報に非対応のブラウザです。'), { code: 'LOCATION_UNAVAILABLE' }));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
+        statusEl.textContent = '現在地を取得しました';
+        statusEl.className = 'location-status ok';
+        resolve({ lat: userLat, lng: userLng });
+      },
+      (error) => {
+        statusEl.textContent = '現在地を取得できませんでした';
+        statusEl.className = 'location-status ng';
+        reject(Object.assign(new Error('現在地を取得できませんでした。'), {
+          code: error.code === 1 ? 'LOCATION_DENIED' : 'LOCATION_UNAVAILABLE'
+        }));
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+    );
+  }).finally(() => { locationPromise = null; });
+  return locationPromise;
 }
 
 function drawWheel() {
@@ -523,11 +606,13 @@ let spinSpeed = 0;
 function spin() {
   if (spinning || items.length < 2) return;
   spinning = true;
+  setGachaBusy(true);
   stopRequested = false;
   document.getElementById('spinBtn').style.display = 'none';
   document.getElementById('stopBtn').style.display = 'inline-block';
   document.getElementById('result').textContent = '';
   document.getElementById('mapBtn').style.display = 'none';
+  document.getElementById('resultSearchBtn').hidden = true;
 
   spinSpeed = 0.15 + Math.random() * 0.05;
   let lastTime = performance.now();
@@ -570,6 +655,7 @@ function decelerate() {
       animId = requestAnimationFrame(animateSlow);
     } else {
       spinning = false;
+      setGachaBusy(false);
       stopRequested = false;
       document.getElementById('stopBtn').style.display = 'none';
       document.getElementById('stopBtn').disabled = false;
@@ -595,18 +681,21 @@ function showResult() {
   resultEl.offsetHeight;
   resultEl.style.animation = 'pop .4s ease';
 
-  // Google Maps 検索リンクを生成
   const mapBtn = document.getElementById('mapBtn');
-  let query = encodeURIComponent(chosen);
-  let url;
-  if (userLat && userLng) {
-    url = `https://www.google.com/maps/search/${query}/@${userLat},${userLng},15z`;
-  } else {
-    url = `https://www.google.com/maps/search/${query}+近く`;
-  }
-  mapBtn.href = url;
+  mapBtn.href = LunchSearchCore.buildSearchUrl(chosen, userLat !== null ? { lat: userLat, lng: userLng } : null);
   mapBtn.style.display = 'inline-block';
   mapBtn.style.animation = 'fadeUp .4s ease';
+  const searchBtn = document.getElementById('resultSearchBtn');
+  searchBtn.hidden = false;
+  searchBtn.onclick = () => {
+    LunchSearchUI.chooseGenre(chosen);
+    switchTab('search');
+  };
+}
+
+function setGachaBusy(busy) {
+  document.querySelectorAll('.tabs button, #lunchSelectArea button, #lunchSelectArea input, #customArea button, #customArea textarea')
+    .forEach(control => { control.disabled = busy; });
 }
 
 function buildLunchGrid() {
@@ -673,6 +762,7 @@ function updateLunchItems() {
   currentAngle = 0;
   document.getElementById('result').textContent = '';
   document.getElementById('mapBtn').style.display = 'none';
+  document.getElementById('resultSearchBtn').hidden = true;
   document.getElementById('spinBtn').disabled = false;
   drawWheel();
 }
@@ -680,38 +770,44 @@ function updateLunchItems() {
 function switchTab(tab) {
   if (spinning) return;
   currentTab = tab;
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  if (tab === 'lunch') {
-    document.querySelectorAll('.tab')[0].classList.add('active');
-    document.getElementById('lunchSelectArea').style.display = '';
-    document.getElementById('customArea').style.display = 'none';
-    updateLunchItems();
-  } else {
-    document.querySelectorAll('.tab')[1].classList.add('active');
-    document.getElementById('lunchSelectArea').style.display = 'none';
-    document.getElementById('customArea').style.display = 'block';
-    applyCustom();
-  }
+  document.querySelectorAll('.tab').forEach(button => {
+    const active = button.dataset.tab === tab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  document.getElementById('gachaPanel').hidden = tab === 'search';
+  document.getElementById('searchPanel').hidden = tab !== 'search';
+  if (tab === 'search') return;
+  document.getElementById('lunchSelectArea').style.display = tab === 'lunch' ? '' : 'none';
+  document.getElementById('customArea').style.display = tab === 'custom' ? 'block' : 'none';
+  if (tab === 'lunch') updateLunchItems();
+  else applyCustom();
   document.getElementById('result').textContent = '';
   document.getElementById('mapBtn').style.display = 'none';
+  document.getElementById('resultSearchBtn').hidden = true;
   currentAngle = 0;
-  drawWheel();
+  resizeCanvas();
 }
 
 function applyCustom() {
+  if (spinning) return;
   const text = document.getElementById('customInput').value.trim();
   const lines = text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  if (lines.length >= 2) {
+  const valid = lines.length >= 2;
+  document.getElementById('spinBtn').disabled = !valid;
+  document.getElementById('customWarn').textContent = valid ? '' : '2つ以上の項目を入力してください';
+  if (valid) {
     items = lines;
     currentAngle = 0;
     document.getElementById('result').textContent = '';
     document.getElementById('mapBtn').style.display = 'none';
+    document.getElementById('resultSearchBtn').hidden = true;
     drawWheel();
   }
 }
 
 // 初期化
-getLocation();
+LunchSearchUI.init({ genres: LUNCH_ITEMS, getLocation });
 buildLunchGrid();
 resizeCanvas();
 </script>
