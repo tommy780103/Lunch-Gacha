@@ -34,11 +34,23 @@
   }
 
   function readyMessage() {
+    updateQuota();
     if (!LunchPlaces.isConfigured()) {
       setStatus('条件つき検索は準備中です。通常のGoogleマップ検索は利用できます。', 'unavailable');
     } else {
       setStatus('ジャンルと条件を選び、「この条件でお店を検索」を押してください。');
     }
+  }
+
+  function updateQuota() {
+    const element = byId('searchQuota');
+    element.hidden = !LunchPlaces.isConfigured();
+    if (element.hidden) return;
+    const quota = LunchPlaces.getQuota();
+    element.textContent = quota
+      ? `検索受付：本日 ${quota.dayUsed} / ${quota.dayLimit}回・今月 ${quota.monthUsed} / ${quota.monthLimit}回（全利用者合計）`
+      : '条件つき検索は全利用者で1日20回・月600回まで。上限に達すると自動で停止します。';
+    element.textContent += ' 失敗した通信も回数に含み、日・月の切り替えは米国太平洋時間です。';
   }
 
   function chooseGenre(genre) {
@@ -165,6 +177,7 @@
       };
       setStatus(messages[error.code] || '条件つき検索を利用できませんでした。通常のGoogleマップ検索をご利用ください。', 'error');
     } finally {
+      updateQuota();
       setBusy(false);
     }
   }

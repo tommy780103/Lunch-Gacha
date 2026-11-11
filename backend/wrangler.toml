@@ -1,0 +1,17 @@
+name = "lunch-gacha-search"
+main = "worker.mjs"
+compatibility_date = "2026-11-11"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGIN = "https://tommy780103.github.io"
+# Enable only after setting the secret and verifying the account's free usage.
+SEARCH_ENABLED = "false"
+
+[[durable_objects.bindings]]
+name = "GLOBAL_QUOTA"
+class_name = "SearchQuota"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SearchQuota"]

@@ -1,8 +1,8 @@
-// Google Cloud の課金・日次割り当て・キー制限を設定してから有効にします。
-// ブラウザー専用キーは利用者から見えます。Web サイト制限と API 制限が必須です。
-// サーバー用キー、無制限キーはここへ記載しないでください。
-// 詳しい有効化手順は README.md を参照してください。
+// 全利用者共通の上限を管理する検索サーバーを設定してから有効にします。
+// searchEndpoint は https://<検索サーバー>/search の形式です。
+// Google API キーはサーバーのシークレットに保存し、このファイルに記載しません。
+// 詳しい設定と有効化手順は README.md を参照してください。
 window.LUNCH_GACHA_CONFIG = Object.freeze({
-  googleMapsApiKey: '',
+  searchEndpoint: '',
   placesEnabled: false
 });

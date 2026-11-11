@@ -69,7 +69,7 @@
 
   function genreQuery(genre) {
     const name = String(genre || '').trim().slice(0, 80);
-    return aliases[name] || name;
+    return Object.hasOwn(aliases, name) ? aliases[name] : name;
   }
 
   function buildSearchUrl(genre, origin) {
