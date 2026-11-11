@@ -40,6 +40,36 @@ function adapterHarness({ configured = true, config, fetch, timers, page = 'http
   return { api: root.LunchPlaces, requests, root };
 }
 
+function uiHarness(api) {
+  class Element {
+    constructor(tag = 'div') { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.textContent = ''; this.value = ''; }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    setAttribute(name, value) { this[name] = value; }
+    removeAttribute(name) { delete this[name]; }
+    addEventListener(name, callback) { this.listeners[name] = callback; }
+    querySelectorAll() { return this.children; }
+    focus() {}
+  }
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  const elements = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(match => [match[1], new Element()]));
+  Object.assign(elements.minRating, { value: '0' });
+  Object.assign(elements.minReviews, { value: '0' });
+  Object.assign(elements.radiusKm, { value: '0.1' });
+  Object.assign(elements.sortOrder, { value: 'rating' });
+  elements.restaurantSearchForm.children = ['genreInput', 'minRating', 'minReviews', 'radiusKm', 'sortOrder', 'searchBtn'].map(id => elements[id]);
+  const window = {};
+  const document = {
+    getElementById: id => elements[id],
+    createElement: tag => new Element(tag),
+    createTextNode: text => Object.assign(new Element(), { textContent: text })
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../search-ui.js'), 'utf8'), { window, document, LunchPlaces: api, LunchSearchCore: core, URL });
+  let locationCalls = 0;
+  window.LunchSearchUI.init({ genres: ['うどん'], getLocation: async () => { locationCalls++; return origin; } });
+  return { elements, get locationCalls() { return locationCalls; } };
+}
+
 test('criteria keep decimal ratings and use safe defaults for missing/non-finite input', () => {
   assert.deepEqual(core.normalizeCriteria(), { minRating: 4, minReviews: 100, radiusKm: 5, sort: 'rating' });
   assert.equal(core.normalizeCriteria({ minRating: '4.2' }).minRating, 4.2);
@@ -63,6 +93,41 @@ test('all three thresholds are applied inclusively; missing data never passes', 
   const result = core.filterPlaces(candidates, origin, { minRating: 4.2, minReviews: 100, radiusKm: 5 });
   assert.deepEqual(result.map(item => item.id), ['boundary']);
   assert.ok(Math.abs(result[0].distanceKm - 5) < 1e-8);
+});
+
+test('unset rating and review filters retain unknowns without inventing zero values', () => {
+  const candidates = [
+    place('unknown', { rating: undefined, userRatingCount: null }),
+    place('noRating', { rating: null }),
+    place('noCount', { userRatingCount: undefined }),
+    place('knownZero', { rating: 0, userRatingCount: 0 }),
+    place('badRating', { rating: '4.5' }),
+    place('badInfinite', { rating: Infinity }),
+    place('badCount', { userRatingCount: -1 })
+  ];
+  const result = core.filterPlaces(candidates, origin, { minRating: 0, minReviews: 0 });
+  assert.deepEqual(result.map(item => item.id), ['noCount', 'knownZero', 'noRating', 'unknown']);
+  const unknown = result.find(item => item.id === 'unknown');
+  assert.equal(unknown.rating, null);
+  assert.equal(unknown.reviewCount, null);
+  assert.deepEqual(core.filterPlaces(candidates, origin, { minRating: 0, minReviews: 100 }).map(item => item.id), ['noRating']);
+  assert.deepEqual(core.filterPlaces(candidates, origin, { minRating: 4, minReviews: 0 }).map(item => item.id), ['noCount']);
+});
+
+test('new decimal radius and thresholds preserve exact filtering and human-readable labels', () => {
+  for (const radiusKm of [0.1, 0.5]) {
+    const boundaryLat = origin.lat + radiusKm / 6371.0088 * 180 / Math.PI;
+    const result = core.filterPlaces([
+      place('boundary', { rating: 3.5, userRatingCount: 1000, location: { lat: boundaryLat, lng: origin.lng } }),
+      place('outside', { rating: 3.5, userRatingCount: 1000, location: { lat: boundaryLat + 0.00001, lng: origin.lng } }),
+      place('low', { rating: 3.49, userRatingCount: 1000 }),
+      place('few', { rating: 3.5, userRatingCount: 999 })
+    ], origin, { minRating: 3.5, minReviews: 1000, radiusKm });
+    assert.deepEqual(result.map(item => item.id), ['boundary']);
+    assert.equal(core.formatDistance(radiusKm), `${radiusKm * 1000}m`);
+  }
+  assert.equal(core.describeCriteria({ minRating: 0, minReviews: 0, radiusKm: 0.1 }), '評価指定なし・口コミ指定なし・100m以内 ／ 評価が高い順');
+  assert.equal(core.describeCriteria({ minRating: 3.5, minReviews: 1000, radiusKm: 0.5 }), '★3.5以上・口コミ1,000件以上・500m以内 ／ 評価が高い順');
 });
 
 test('zero coordinates and Google LatLng getter functions are supported', () => {
@@ -295,5 +360,124 @@ test('timeout aborts the request after 25 seconds and late responses cannot over
   assert.equal(harness.api.getQuota().dayUsed, 1);
   assert.equal(harness.requests.length, 2);
   assert.equal(timers.size, 0);
+});
+
+test('quota refresh reads the same-origin endpoint without a search POST or location data', async () => {
+  const counts = quota({ dayUsed: 3, monthUsed: 125 });
+  const harness = adapterHarness({
+    page: 'https://lunch.example.workers.dev/',
+    config: { searchEndpoint: 'https://lunch.example.workers.dev/search', placesEnabled: false },
+    fetch: () => response({ quota: counts })
+  });
+  assert.equal(harness.api.getQuota(), null);
+  assert.equal(harness.api.getQuotaStatus(), 'idle');
+  const first = harness.api.refreshQuota();
+  const concurrent = harness.api.refreshQuota();
+  assert.equal(first, concurrent, 'concurrent reads share one request');
+  assert.equal(harness.api.getQuotaStatus(), 'loading');
+  assert.equal(harness.api.getQuota(), null);
+  await first;
+  assert.deepEqual({ ...harness.api.getQuota() }, counts);
+  assert.equal(harness.api.getQuotaStatus(), 'ready');
+  assert.equal(harness.requests.length, 1);
+  const { url, options } = harness.requests[0];
+  assert.equal(url, 'https://lunch.example.workers.dev/quota');
+  assert.equal(options.method, 'GET');
+  assert.equal(options.body, undefined);
+  assert.equal(options.credentials, 'same-origin');
+  assert.equal(options.cache, 'no-store');
+  assert.equal(options.redirect, 'error');
+  assert.deepEqual({ ...options.headers }, { Accept: 'application/json' });
+  const other = adapterHarness();
+  await assert.rejects(other.api.refreshQuota(), { code: 'NOT_CONFIGURED' });
+  assert.equal(other.requests.length, 0, 'quota reads never target a separate origin');
+});
+
+test('failed or malformed quota reads clear counts instead of guessing unused quota', async () => {
+  for (const failure of [
+    () => response({ error: { code: 'REQUEST_FAILED' } }, 503),
+    () => response({ quota: quota({ dayUsed: 21 }) }),
+    () => response({ quota: quota(), error: { code: 'NETWORK' } }),
+    () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('login HTML'); } }),
+    () => { throw new TypeError('offline'); }
+  ]) {
+    const harness = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, _options, attempt) => attempt === 1 ? response({ quota: quota() }) : failure() });
+    await harness.api.refreshQuota();
+    assert.ok(harness.api.getQuota());
+    await assert.rejects(harness.api.refreshQuota());
+    assert.equal(harness.api.getQuota(), null);
+    assert.equal(harness.api.getQuotaStatus(), 'error');
+    assert.equal(harness.requests.length, 2, 'no retry or search on read failure');
+  }
+});
+
+test('quota refresh cannot overwrite newer search counts or clear them on a late read failure', async () => {
+  for (const lateFailure of [false, true]) {
+    let resolveRead;
+    const counts = quota({ dayUsed: 8, monthUsed: 90 });
+    const harness = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+      ? new Promise(resolve => { resolveRead = resolve; })
+      : response({ places: [], quota: counts }) });
+    const read = harness.api.refreshQuota();
+    await harness.api.search('うどん', origin, {});
+    resolveRead(lateFailure ? response({ error: { code: 'REQUEST_FAILED' } }, 503) : response({ quota: quota() }));
+    await read;
+    assert.deepEqual({ ...harness.api.getQuota() }, counts);
+    assert.equal(harness.api.getQuotaStatus(), 'ready');
+    assert.equal(harness.requests.length, 2);
+  }
+});
+
+test('quota reads during an in-flight search defer to its result without another GET', async () => {
+  let resolveSearch;
+  const harness = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: () => new Promise(resolve => { resolveSearch = resolve; }) });
+  const search = harness.api.search('うどん', origin, {});
+  assert.equal(await harness.api.refreshQuota(), null);
+  assert.equal(harness.requests.length, 1);
+  assert.equal(harness.requests[0].options.method, 'POST');
+  resolveSearch(response());
+  await search;
+  assert.deepEqual({ ...harness.api.getQuota() }, quota());
+});
+
+test('quota cards show pending, verified month/day balances and explicit read failure', async () => {
+  let resolveRead;
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, _options, attempt) => attempt === 1
+    ? new Promise(resolve => { resolveRead = resolve; })
+    : response({ error: { code: 'REQUEST_FAILED' } }, 503) });
+  const ui = uiHarness(adapter.api);
+  assert.equal(ui.elements.quotaMonthUsed.textContent, '確認中…');
+  assert.equal(ui.elements.quotaMonthRemaining.textContent, '確認中…');
+  assert.equal(ui.locationCalls, 0);
+  resolveRead(response({ quota: quota({ dayUsed: 20, monthUsed: 450 }) }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.elements.quotaMonthUsed.textContent, '450回');
+  assert.equal(ui.elements.quotaMonthRemaining.textContent, '150回');
+  assert.equal(ui.elements.quotaDayRemaining.textContent, '0回');
+  assert.match(ui.elements.quotaStatus.textContent, /今日は検索できません/);
+  await ui.elements.quotaRefreshBtn.listeners.click();
+  assert.equal(ui.elements.quotaMonthUsed.textContent, '取得できません');
+  assert.equal(ui.elements.quotaMonthRemaining.textContent, '取得できません');
+  assert.equal(ui.elements.quotaDayRemaining.textContent, '取得できません');
+  assert.equal(ui.elements.quotaRefreshBtn.disabled, false);
+  assert.equal(adapter.requests.every(({ options }) => options.method === 'GET'), true);
+});
+
+test('UI renders unknown ratings and reviews with unset filters and meter labels', async () => {
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+    ? response({ quota: quota() })
+    : response({ places: [place('new', { rating: undefined, userRatingCount: undefined })], quota: quota({ dayUsed: 2, monthUsed: 2 }) }) });
+  const ui = uiHarness(adapter.api);
+  await new Promise(resolve => setImmediate(resolve));
+  await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  assert.equal(ui.elements.searchResults.hidden, false);
+  const stats = ui.elements.restaurantList.children[0].children[1].children.map(element => element.textContent);
+  assert.deepEqual(stats, ['評価情報なし', '口コミ情報なし', '0m']);
+  assert.equal(ui.elements.resultCriteria.textContent, '評価指定なし・口コミ指定なし・100m以内 ／ 評価が高い順');
+  assert.equal(ui.elements.quotaMonthUsed.textContent, '2回');
+  assert.equal(ui.elements.quotaMonthRemaining.textContent, '598回');
+  assert.equal(ui.elements.quotaDayRemaining.textContent, '18回');
+  assert.equal(ui.locationCalls, 1);
+  assert.deepEqual(adapter.requests.map(({ options }) => options.method), ['GET', 'POST']);
 });
 

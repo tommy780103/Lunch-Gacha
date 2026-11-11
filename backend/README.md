@@ -17,6 +17,7 @@ Worker単位のCloudflare Accessを「All traffic」で設定し、本人メー�
 ```text
 https://lunch-gacha-search.choi-tool.workers.dev/
 https://lunch-gacha-search.choi-tool.workers.dev/search
+https://lunch-gacha-search.choi-tool.workers.dev/quota
 ```
 
 静的資産はビルドスクリプトが13ファイルの許可リストから生成します。画面や設定の変更後、デプロイ前に次のコマンドを必ず実行してください。Wranglerは生成済みの資産だけをアップロードします。
@@ -87,6 +88,8 @@ npx wrangler@4.160.0 deploy --config backend/wrangler.toml
 
 Google では最小評価を 0.5 刻みに切り下げて検索し、最大 20 件を返します。口コミ件数、正確な評価閾値、現在地からの円形距離の絞り込みはフロントエンドの `search-core.js` が行います。Google の全店舗を取得・比較するものではありません。
 
+評価・口コミの「指定なし」はそれぞれ0で指定します。評価0の場合はGoogleへの最小評価指定を省略します。評価3.5、口コミ1,000件、距離0.1km・0.5kmにも対応します。未掲載の評価や口コミ件数は、その項目が「指定なし」の場合だけ画面の絞り込み対象に残します。
+
 成功時は `places` と `quota` を返します。店舗の `displayName` は文字列、`location` は `{lat,lng}`、出典は `{provider,providerURI}` に変換します。
 
 ```json
@@ -97,6 +100,24 @@ Google では最小評価を 0.5 刻みに切り下げて検索し、最大 20 �
 ```
 
 エラーは `{ "error": { "code": "...", "message": "..." }, "quota": { ... } }` です。`quota` は値が分かる場合だけ付けます。
+
+### 使用回数の読み取り
+
+```text
+GET /quota
+```
+
+同じ共有カウンターから日・月の使用回数を取得します。Google呼び出し、回数の加算、保存データの更新・削除は行いません。検索の停止中やキー未登録でも読み取り可能です。Cloudflare Accessによる認証は必要です。
+
+```json
+{
+  "quota": { "dayUsed": 2, "dayLimit": 20, "monthUsed": 2, "monthLimit": 600 }
+}
+```
+
+現在の米国太平洋時間の期間に合わせた値を返します。未作成状態だけを0として扱い、不正な保存値・未来の期間・ストレージ障害では503を返します。日月の切替判定で保存値を書き換えることはありません。応答はキャッシュしません。同一オリジンのGETで省略されるOriginヘッダーはこの経路だけ許容し、明示されたOriginは許可オリジンとの完全一致を要求します。検索POSTのOrigin検証は従来どおりです。
+
+画面は月の使用回数、月の残り回数、日の残り回数を表示します。古い読み取り応答が検索後の新しい使用回数を上書きしないよう管理します。回数取得の失敗は未確認として表示し、利用枠が満杯に戻ったようには表示しません。
 
 | code | HTTP | 意味 |
 | --- | --- | --- |

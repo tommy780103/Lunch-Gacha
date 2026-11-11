@@ -1,6 +1,6 @@
 import {
   SearchError, GLOBAL_OBJECT_NAME, GOOGLE_ENDPOINT, GOOGLE_FIELDS,
-  validateSearchInput, reserveQuota, googleSearchBody, normalizePlaces
+  validateSearchInput, readQuota, reserveQuota, googleSearchBody, normalizePlaces
 } from './domain.mjs';
 
 export const MAX_BODY_BYTES = 4096;
@@ -104,7 +104,11 @@ export async function executeSearch(rawInput, env, { storage, fetchImpl = fetch,
 
 export async function handleQuotaRequest(request, env, dependencies) {
   try {
-    if (request.method !== 'POST' || new URL(request.url).pathname !== '/search') {
+    const path = new URL(request.url).pathname;
+    if (request.method === 'GET' && path === '/quota') {
+      return json({ quota: await readQuota(dependencies.storage, dependencies.now ? dependencies.now() : new Date()) });
+    }
+    if (request.method !== 'POST' || path !== '/search') {
       throw new SearchError('INVALID_REQUEST', 400, '検索リクエストが正しくありません。');
     }
     return json(await executeSearch(await readBoundedJson(request), env, dependencies));
@@ -122,33 +126,45 @@ function allowedOrigin(env) {
 export async function handlePublicRequest(request, env) {
   const origin = allowedOrigin(env);
   if (!origin) return failure(new SearchError('NOT_CONFIGURED', 503, 'お店検索は準備中です。'));
+  const path = new URL(request.url).pathname;
+  const requestOrigin = request.headers.get('Origin');
+  // Same-origin browser GETs may omit Origin. Access protects this read-only
+  // route too; explicit origins and every search keep the exact-origin check.
+  const originlessQuotaRead = path === '/quota' && request.method === 'GET' && requestOrigin === null;
   // CORS is a browser access policy, not authentication. The shared hard cap
   // protects the Google request count even if an attacker forges this header.
-  if (request.headers.get('Origin') !== origin) {
+  if (!originlessQuotaRead && requestOrigin !== origin) {
     return failure(new SearchError('FORBIDDEN', 403, 'このサイトからは検索できません。'));
   }
   const cors = {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': path === '/quota' ? 'GET, OPTIONS' : 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
     'Cache-Control': 'no-store'
   };
   let response;
   try {
-    if (new URL(request.url).pathname !== '/search') {
+    if (path !== '/search' && path !== '/quota') {
       throw new SearchError('INVALID_REQUEST', 404, 'このURLは利用できません。');
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-    if (request.method !== 'POST') throw new SearchError('INVALID_REQUEST', 405, 'POSTで検索条件を送信してください。');
-    assertConfigured(env);
-    const input = validateSearchInput(await readBoundedJson(request));
+    let internalRequest;
+    if (path === '/quota') {
+      if (request.method !== 'GET') throw new SearchError('INVALID_REQUEST', 405, 'GETで利用回数を取得してください。');
+      internalRequest = new Request('https://quota.internal/quota');
+    } else {
+      if (request.method !== 'POST') throw new SearchError('INVALID_REQUEST', 405, 'POSTで検索条件を送信してください。');
+      assertConfigured(env);
+      const input = validateSearchInput(await readBoundedJson(request));
+      internalRequest = new Request('https://quota.internal/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input)
+      });
+    }
     if (!env.GLOBAL_QUOTA) throw new SearchError('NOT_CONFIGURED', 503, 'お店検索は準備中です。');
     const id = env.GLOBAL_QUOTA.idFromName(GLOBAL_OBJECT_NAME);
     const stub = env.GLOBAL_QUOTA.get(id);
-    response = await stub.fetch(new Request('https://quota.internal/search', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input)
-    }));
+    response = await stub.fetch(internalRequest);
   } catch (error) { response = failure(error); }
   const headers = new Headers(response.headers);
   for (const [key, value] of Object.entries(cors)) headers.set(key, value);

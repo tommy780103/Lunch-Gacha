@@ -44,13 +44,30 @@
 
   function updateQuota() {
     const element = byId('searchQuota');
-    element.hidden = !LunchPlaces.isConfigured();
-    if (element.hidden) return;
     const quota = LunchPlaces.getQuota();
-    element.textContent = quota
-      ? `検索受付：本日 ${quota.dayUsed} / ${quota.dayLimit}回・今月 ${quota.monthUsed} / ${quota.monthLimit}回（全利用者合計）`
-      : '条件つき検索は全利用者で1日20回・月600回まで。上限に達すると自動で停止します。';
-    element.textContent += ' 失敗した通信も回数に含み、日・月の切り替えは米国太平洋時間です。';
+    const state = LunchPlaces.getQuotaStatus();
+    element.dataset.state = state;
+    const unknown = state === 'error' ? '取得できません' : '確認中…';
+    byId('quotaMonthUsed').textContent = quota ? `${quota.monthUsed}回` : unknown;
+    byId('quotaMonthRemaining').textContent = quota ? `${quota.monthLimit - quota.monthUsed}回` : unknown;
+    byId('quotaDayRemaining').textContent = quota ? `${quota.dayLimit - quota.dayUsed}回` : unknown;
+    let message = state === 'error' ? '利用回数を取得できませんでした。「更新」でもう一度確認できます。' : '利用回数を確認中です。';
+    if (quota) {
+      message = quota.monthUsed === quota.monthLimit ? '今月の検索上限に達しました。'
+        : quota.dayUsed === quota.dayLimit ? '今日の検索上限に達しました。今月の残りがあっても、今日は検索できません。'
+        : '全利用者で共通の回数です。検索のたびに表示を更新します。';
+    }
+    byId('quotaStatus').textContent = message;
+    byId('quotaRefreshBtn').disabled = busy || state === 'loading';
+  }
+
+  async function refreshQuota() {
+    if (busy) return;
+    const request = LunchPlaces.refreshQuota();
+    updateQuota();
+    try { await request; }
+    catch (_) { /* The adapter exposes an unknown count and error state. */ }
+    finally { updateQuota(); }
   }
 
   function chooseGenre(genre) {
@@ -67,6 +84,7 @@
     });
     byId('searchBtn').textContent = value ? 'お店を探しています…' : 'この条件でお店を検索';
     byId('searchPanel').setAttribute('aria-busy', String(value));
+    updateQuota();
   }
 
   function createTextElement(tag, className, text) {
@@ -90,9 +108,9 @@
       const card = createTextElement('li', 'restaurant-card', '');
       card.append(createTextElement('h4', '', `${index + 1}. ${place.name}`));
       const stats = createTextElement('div', 'restaurant-stats', '');
-      stats.append(createTextElement('span', 'restaurant-rating', `★${place.rating.toFixed(1)}`));
-      stats.append(createTextElement('span', '', `口コミ ${place.reviewCount.toLocaleString('ja-JP')}件`));
-      stats.append(createTextElement('span', '', `${place.distanceKm.toFixed(1)}km`));
+      stats.append(createTextElement('span', 'restaurant-rating', place.rating === null ? '評価情報なし' : `★${place.rating.toFixed(1)}`));
+      stats.append(createTextElement('span', '', place.reviewCount === null ? '口コミ情報なし' : `口コミ ${place.reviewCount.toLocaleString('ja-JP')}件`));
+      stats.append(createTextElement('span', '', LunchSearchCore.formatDistance(place.distanceKm)));
       card.append(stats);
       const href = safeExternalLink(place.mapsUrl);
       if (href) {
@@ -120,8 +138,7 @@
       list.append(card);
     }
     byId('resultsTitle').textContent = `${genre}のお店 ${places.length}件`;
-    const sortLabel = { rating: '評価が高い順', reviews: '口コミが多い順', distance: '近い順' }[criteria.sort];
-    byId('resultCriteria').textContent = `★${criteria.minRating.toFixed(1)}以上・口コミ${criteria.minReviews}件以上・${criteria.radiusKm}km以内 ／ ${sortLabel}`;
+    byId('resultCriteria').textContent = LunchSearchCore.describeCriteria(criteria);
     byId('searchResults').hidden = false;
     const shortlist = LunchSearchCore.buildShortlistUrl(places.map(place => place.id));
     if (shortlist && places.length) {
@@ -163,7 +180,9 @@
       if (generation !== requestGeneration) return;
       updateFallback();
       setStatus('評価・口コミ件数を確認して、お店を探しています…', 'loading');
-      const places = await LunchPlaces.search(genre, origin, criteria);
+      const request = LunchPlaces.search(genre, origin, criteria);
+      updateQuota();
+      const places = await request;
       if (generation !== requestGeneration) return;
       renderResults(places, genre, criteria);
     } catch (error) {
@@ -202,8 +221,11 @@
       byId(id).addEventListener('change', () => { clearResults(); readyMessage(); });
     });
     byId('restaurantSearchForm').addEventListener('submit', search);
+    byId('quotaRefreshBtn').addEventListener('click', refreshQuota);
     chooseGenre(settings.genres[0]);
+    refreshQuota();
   }
 
   window.LunchSearchUI = Object.freeze({ init, chooseGenre });
 })();
+

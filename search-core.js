@@ -28,6 +28,18 @@
     };
   }
 
+  function formatDistance(distance) {
+    return distance < 1 ? `${Math.round(distance * 1000)}m` : `${Number(distance.toFixed(1))}km`;
+  }
+
+  function describeCriteria(criteria) {
+    const filters = normalizeCriteria(criteria);
+    const rating = filters.minRating === 0 ? '評価指定なし' : `★${filters.minRating.toFixed(1)}以上`;
+    const reviews = filters.minReviews === 0 ? '口コミ指定なし' : `口コミ${filters.minReviews.toLocaleString('ja-JP')}件以上`;
+    const sort = { rating: '評価が高い順', reviews: '口コミが多い順', distance: '近い順' }[filters.sort];
+    return `${rating}・${reviews}・${formatDistance(filters.radiusKm)}以内 ／ ${sort}`;
+  }
+
   function coordinates(value) {
     if (!value) return null;
     let lat;
@@ -113,22 +125,29 @@
       const id = place.id.trim();
       const name = typeof place.displayName === 'string' ? place.displayName.trim() : '';
       if (!name || seen.has(id)) continue;
-      const rating = place.rating;
-      const reviewCount = place.userRatingCount;
-      if (typeof rating !== 'number' || !Number.isFinite(rating) || rating < 0 || rating > 5) continue;
-      if (typeof reviewCount !== 'number' || !Number.isSafeInteger(reviewCount) || reviewCount < 0) continue;
+      // Missing information stays unknown. It is eligible only when its
+      // corresponding minimum is unset; never turn it into a zero rating.
+      const rating = place.rating ?? null;
+      const reviewCount = place.userRatingCount ?? null;
+      if (rating !== null && (typeof rating !== 'number' || !Number.isFinite(rating) || rating < 0 || rating > 5)) continue;
+      if (reviewCount !== null && (typeof reviewCount !== 'number' || !Number.isSafeInteger(reviewCount) || reviewCount < 0)) continue;
       const distance = distanceKm(center, place.location);
-      if (!Number.isFinite(distance) || rating < filters.minRating || reviewCount < filters.minReviews || distance > filters.radiusKm + 1e-9) continue;
+      if (!Number.isFinite(distance) || distance > filters.radiusKm + 1e-9) continue;
+      if (filters.minRating > 0 && (rating === null || rating < filters.minRating)) continue;
+      if (filters.minReviews > 0 && (reviewCount === null || reviewCount < filters.minReviews)) continue;
       seen.add(id);
       results.push({ id, name, rating, reviewCount, distanceKm: distance, mapsUrl: buildPlaceUrl(id, name), attributions: normalizeAttributions(place.attributions) });
     }
     const tie = (a, b) => a.name.localeCompare(b.name, 'ja') || a.id.localeCompare(b.id);
-    const byRating = (a, b) => b.rating - a.rating || b.reviewCount - a.reviewCount || a.distanceKm - b.distanceKm || tie(a, b);
-    const byReviews = (a, b) => b.reviewCount - a.reviewCount || b.rating - a.rating || a.distanceKm - b.distanceKm || tie(a, b);
-    const byDistance = (a, b) => a.distanceKm - b.distanceKm || b.rating - a.rating || b.reviewCount - a.reviewCount || tie(a, b);
+    const ratingOrder = (a, b) => (b.rating ?? -1) - (a.rating ?? -1);
+    const reviewOrder = (a, b) => (b.reviewCount ?? -1) - (a.reviewCount ?? -1);
+    const byRating = (a, b) => ratingOrder(a, b) || reviewOrder(a, b) || a.distanceKm - b.distanceKm || tie(a, b);
+    const byReviews = (a, b) => reviewOrder(a, b) || ratingOrder(a, b) || a.distanceKm - b.distanceKm || tie(a, b);
+    const byDistance = (a, b) => a.distanceKm - b.distanceKm || ratingOrder(a, b) || reviewOrder(a, b) || tie(a, b);
     results.sort(filters.sort === 'reviews' ? byReviews : filters.sort === 'distance' ? byDistance : byRating);
     return results.slice(0, 10);
   }
 
-  return Object.freeze({ DEFAULTS, normalizeCriteria, coordinates, distanceKm, boundsForRadius, genreQuery, filterPlaces, buildSearchUrl, buildShortlistUrl });
+  return Object.freeze({ DEFAULTS, normalizeCriteria, formatDistance, describeCriteria, coordinates, distanceKm, boundsForRadius, genreQuery, filterPlaces, buildSearchUrl, buildShortlistUrl });
 });
+

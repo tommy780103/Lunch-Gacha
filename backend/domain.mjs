@@ -39,7 +39,7 @@ function validState(state) {
     && Number.isSafeInteger(state.monthUsed) && state.monthUsed >= state.dayUsed && state.monthUsed <= MONTHLY_LIMIT;
 }
 
-export function nextReservation(previous, now = new Date()) {
+function currentQuotaState(previous, now) {
   const period = billingPeriod(now);
   if (previous !== undefined && (!validState(previous) || previous.day > period.day)) {
     throw new Error('Quota state is invalid; refusing to reset it');
@@ -55,6 +55,17 @@ export function nextReservation(previous, now = new Date()) {
     state.day = period.day;
     state.dayUsed = 0;
   }
+  return state;
+}
+
+// A single stored record contains both counters, so a read cannot mix periods
+// or overwrite reservations made concurrently. Period rollover is only a view.
+export async function readQuota(storage, now = new Date()) {
+  return quotaSummary(currentQuotaState(await storage.get(STATE_KEY), now));
+}
+
+export function nextReservation(previous, now = new Date()) {
+  const state = currentQuotaState(previous, now);
   if (state.dayUsed >= DAILY_LIMIT || state.monthUsed >= MONTHLY_LIMIT) {
     throw new SearchError('QUOTA_EXCEEDED', 429, 'お店検索の利用上限に達しました。次の更新までお待ちください。', quotaSummary(state));
   }
@@ -126,7 +137,7 @@ export function googleSearchBody(input) {
   return {
     textQuery: `${Object.hasOwn(aliases, genre) ? aliases[genre] : genre} 飲食店`,
     languageCode: 'ja', regionCode: 'JP', pageSize: 20,
-    minRating: Math.floor(criteria.minRating * 2) / 2,
+    ...(criteria.minRating > 0 ? { minRating: Math.floor(criteria.minRating * 2) / 2 } : {}),
     locationRestriction: { rectangle: {
       low: { latitude: degrees(south), longitude: west },
       high: { latitude: degrees(north), longitude: east }
@@ -160,3 +171,4 @@ export function normalizePlaces(payload) {
     }];
   });
 }
+

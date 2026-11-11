@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   SearchError, STATE_KEY, GLOBAL_OBJECT_NAME, GOOGLE_ENDPOINT, GOOGLE_FIELDS,
-  billingPeriod, nextReservation, reserveQuota, validateSearchInput, googleSearchBody
+  billingPeriod, nextReservation, readQuota, reserveQuota, validateSearchInput, googleSearchBody, normalizePlaces
 } from '../backend/domain.mjs';
 import {
   executeSearch, handlePublicRequest, handleQuotaRequest, readBoundedJson
@@ -16,6 +16,10 @@ class MemoryStorage {
     this.tail = Promise.resolve();
     this.committed = 0;
     this.synced = 0;
+  }
+  get(key) {
+    assert.equal(key, STATE_KEY);
+    return this.tail.then(() => structuredClone(this.state));
   }
   transaction(callback) {
     const result = this.tail.then(async () => {
@@ -117,6 +121,85 @@ test('new handler/storage instance resumes persisted usage', async () => {
   assert.deepEqual(await reserveQuota(restarted, now()), { dayUsed: 2, dayLimit: 20, monthUsed: 2, monthLimit: 600 });
 });
 
+test('quota reads report unused and exhausted storage without reservations or writes', async () => {
+  const exhausted = { version: 1, day: '2026-11-11', month: '2026-11', dayUsed: 20, monthUsed: 600 };
+  for (const previous of [undefined, exhausted]) {
+    const storage = new MemoryStorage(previous);
+    const expected = previous
+      ? { dayUsed: 20, dayLimit: 20, monthUsed: 600, monthLimit: 600 }
+      : { dayUsed: 0, dayLimit: 20, monthUsed: 0, monthLimit: 600 };
+    for (let i = 0; i < 3; i++) assert.deepEqual(await readQuota(storage, now()), expected);
+    assert.deepEqual(storage.state, previous);
+    assert.equal(storage.committed, 0);
+    assert.equal(storage.synced, 0);
+  }
+});
+
+test('quota reads apply Pacific day and month rollover only to the returned view', async () => {
+  for (const [previous, timestamp, dayUsed, monthUsed] of [
+    [{ version: 1, day: '2026-03-08', month: '2026-03', dayUsed: 20, monthUsed: 160 }, '2026-03-09T06:59:59Z', 20, 160],
+    [{ version: 1, day: '2026-03-08', month: '2026-03', dayUsed: 20, monthUsed: 160 }, '2026-03-09T07:00:00Z', 0, 160],
+    [{ version: 1, day: '2026-03-31', month: '2026-03', dayUsed: 20, monthUsed: 600 }, '2026-04-01T06:59:59Z', 20, 600],
+    [{ version: 1, day: '2026-03-31', month: '2026-03', dayUsed: 20, monthUsed: 600 }, '2026-04-01T07:00:00Z', 0, 0]
+  ]) {
+    const storage = new MemoryStorage(previous);
+    assert.deepEqual(await readQuota(storage, new Date(timestamp)), { dayUsed, dayLimit: 20, monthUsed, monthLimit: 600 });
+    assert.deepEqual(storage.state, previous);
+    assert.equal(storage.committed, 0);
+  }
+});
+
+test('parallel quota reads neither consume nor overwrite concurrent reservations', async () => {
+  const storage = new MemoryStorage();
+  const reservations = [];
+  const reads = [];
+  for (let i = 0; i < 35; i++) {
+    reads.push(readQuota(storage, now()));
+    reservations.push(reserveQuota(storage, now()));
+    reads.push(readQuota(storage, now()));
+  }
+  const [reservationResults, snapshots] = await Promise.all([Promise.allSettled(reservations), Promise.all(reads)]);
+  assert.equal(reservationResults.filter(result => result.status === 'fulfilled').length, 20);
+  assert.equal(reservationResults.filter(result => result.status === 'rejected' && result.reason.code === 'QUOTA_EXCEEDED').length, 15);
+  assert.equal(storage.committed, 20);
+  assert.deepEqual(await readQuota(storage, now()), { dayUsed: 20, dayLimit: 20, monthUsed: 20, monthLimit: 600 });
+  for (const snapshot of snapshots) {
+    assert.ok(snapshot.dayUsed >= 0 && snapshot.dayUsed <= 20);
+    assert.equal(snapshot.monthUsed, snapshot.dayUsed);
+  }
+});
+
+test('internal quota reads work without search configuration and never call Google', async () => {
+  const previous = { version: 1, day: '2026-11-11', month: '2026-11', dayUsed: 2, monthUsed: 50 };
+  const storage = new MemoryStorage(previous);
+  for (const config of [{}, { SEARCH_ENABLED: 'false' }, { ...env, GOOGLE_PLACES_API_KEY: '' }]) {
+    const result = await handleQuotaRequest(new Request('https://quota.internal/quota'), config, {
+      storage, now, fetchImpl: async () => { assert.fail('Quota reads must never call Google'); }
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get('Cache-Control'), 'no-store');
+    assert.deepEqual(await result.json(), { quota: { dayUsed: 2, dayLimit: 20, monthUsed: 50, monthLimit: 600 } });
+  }
+  assert.deepEqual(storage.state, previous);
+  assert.equal(storage.committed, 0);
+});
+
+test('quota read failures return unavailable rather than inventing zero usage', async () => {
+  for (const storage of [
+    { get: async () => { throw new Error('read failure'); } },
+    new MemoryStorage(null),
+    new MemoryStorage({ version: 1, day: '2026-11-12', month: '2026-11', dayUsed: 1, monthUsed: 1 })
+  ]) {
+    const result = await handleQuotaRequest(new Request('https://quota.internal/quota'), {}, {
+      storage, now, fetchImpl: async () => { assert.fail('Google must not be called'); }
+    });
+    assert.equal(result.status, 503);
+    const body = await result.json();
+    assert.equal(body.error.code, 'REQUEST_FAILED');
+    assert.equal(Object.hasOwn(body, 'quota'), false);
+  }
+});
+
 test('failed HTTP, malformed response, network failure and timeout all consume exactly once', async () => {
   for (const [fetchImpl, code] of [
     [async () => new Response('secret backend error', { status: 500 }), 'REQUEST_FAILED'],
@@ -158,6 +241,7 @@ test('unknown/corrupt state and backwards clock fail closed without Google', asy
     await assert.rejects(executeSearch(input, env, {
       storage, now, fetchImpl: async () => { assert.fail('Google must not be called'); }
     }));
+    await assert.rejects(readQuota(storage, now()));
     assert.deepEqual(storage.state, state);
   }
 });
@@ -241,6 +325,33 @@ test('bad input and client key/quota/endpoint/object/field overrides are rejecte
   ]) assert.throws(() => validateSearchInput(body), { code: 'INVALID_REQUEST' });
 });
 
+test('new filter choices preserve values and omit the Google rating restriction for no minimum', () => {
+  for (const minRating of [0, 3.5]) {
+    for (const minReviews of [0, 1000]) {
+      for (const radiusKm of [0.1, 0.5]) {
+        const criteria = { minRating, minReviews, radiusKm, sort: 'rating' };
+        const validated = validateSearchInput({ ...input, criteria });
+        assert.deepEqual(validated.criteria, criteria);
+        const body = googleSearchBody(validated);
+        assert.equal(Object.hasOwn(body, 'minRating'), minRating !== 0);
+        if (minRating !== 0) assert.equal(body.minRating, 3.5);
+        const rectangle = body.locationRestriction.rectangle;
+        assert.ok(rectangle.low.latitude < input.origin.lat && rectangle.high.latitude > input.origin.lat);
+        assert.ok(rectangle.low.longitude < input.origin.lng && rectangle.high.longitude > input.origin.lng);
+        assert.ok(rectangle.high.latitude - rectangle.low.latitude < 0.01);
+        assert.equal(body.pageSize, 20);
+      }
+    }
+  }
+  const small = googleSearchBody(validateSearchInput({ ...input, criteria: { radiusKm: 0.1 } })).locationRestriction.rectangle;
+  const larger = googleSearchBody(validateSearchInput({ ...input, criteria: { radiusKm: 0.5 } })).locationRestriction.rectangle;
+  assert.ok(larger.low.latitude < small.low.latitude && larger.high.latitude > small.high.latitude);
+  const [unrated] = normalizePlaces({ places: [{ id: 'unrated', displayName: { text: '評価情報なし' }, location: { latitude: 35.68, longitude: 139.76 } }] });
+  assert.equal(unrated.id, 'unrated');
+  assert.equal(unrated.rating, undefined);
+  assert.equal(unrated.userRatingCount, undefined);
+});
+
 test('body size is enforced for streamed bodies without Content-Length', async () => {
   let cancelled = false;
   const streamed = new Request('https://search.example/search', {
@@ -301,6 +412,61 @@ test('disabled public route and nonexistent reset route never access the quota o
     method: 'POST', headers: { Origin: env.ALLOWED_ORIGIN }
   }), boundEnv);
   assert.equal(reset.status, 404);
+});
+
+test('public quota GET uses the existing object with or without Origin and never consumes usage', async () => {
+  const storage = new MemoryStorage({ version: 1, day: '2026-11-11', month: '2026-11', dayUsed: 3, monthUsed: 30 });
+  let routed = 0;
+  const boundEnv = { ALLOWED_ORIGIN: env.ALLOWED_ORIGIN, SEARCH_ENABLED: 'false', GLOBAL_QUOTA: {
+    idFromName: name => { assert.equal(name, GLOBAL_OBJECT_NAME); return 'fixed-id'; },
+    get: id => {
+      assert.equal(id, 'fixed-id');
+      return { fetch: internal => {
+        routed++;
+        assert.equal(internal.url, 'https://quota.internal/quota');
+        assert.equal(internal.method, 'GET');
+        assert.equal(internal.body, null);
+        return handleQuotaRequest(internal, boundEnv, {
+          storage, now, fetchImpl: async () => { assert.fail('Google must not be called'); }
+        });
+      } };
+    }
+  } };
+  for (const headers of [{}, { Origin: env.ALLOWED_ORIGIN }]) {
+    const result = await handlePublicRequest(new Request('https://search.example/quota', { headers }), boundEnv);
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get('Access-Control-Allow-Origin'), env.ALLOWED_ORIGIN);
+    assert.equal(result.headers.get('Cache-Control'), 'no-store');
+    assert.deepEqual(await result.json(), { quota: { dayUsed: 3, dayLimit: 20, monthUsed: 30, monthLimit: 600 } });
+  }
+  for (const origin of ['https://evil.example', 'https://tommy780103.github.io.evil.example', 'null', '']) {
+    const result = await handlePublicRequest(new Request('https://search.example/quota', { headers: { Origin: origin } }), boundEnv);
+    assert.equal(result.status, 403);
+  }
+  const searchWithoutOrigin = await handlePublicRequest(request(input, { headers: { 'Content-Type': 'application/json' } }), boundEnv);
+  assert.equal(searchWithoutOrigin.status, 403);
+  assert.equal(routed, 2);
+  assert.equal(storage.committed, 0);
+  const unavailable = await handlePublicRequest(new Request('https://search.example/quota'), { ALLOWED_ORIGIN: env.ALLOWED_ORIGIN });
+  assert.equal(unavailable.status, 503);
+  assert.equal(Object.hasOwn(await unavailable.json(), 'quota'), false);
+});
+
+test('quota preflight advertises GET and rejects other methods without touching the object', async () => {
+  const boundEnv = { ...env, GLOBAL_QUOTA: { idFromName() { assert.fail('No object access'); } } };
+  for (const [path, methods] of [['/quota', 'GET, OPTIONS'], ['/search', 'POST, OPTIONS']]) {
+    const result = await handlePublicRequest(new Request(`https://search.example${path}`, {
+      method: 'OPTIONS', headers: { Origin: env.ALLOWED_ORIGIN }
+    }), boundEnv);
+    assert.equal(result.status, 204);
+    assert.equal(result.headers.get('Access-Control-Allow-Methods'), methods);
+  }
+  const wrongMethod = await handlePublicRequest(new Request('https://search.example/quota', {
+    method: 'POST', headers: { Origin: env.ALLOWED_ORIGIN }
+  }), boundEnv);
+  assert.equal(wrongMethod.status, 405);
+  const noOriginPreflight = await handlePublicRequest(new Request('https://search.example/quota', { method: 'OPTIONS' }), boundEnv);
+  assert.equal(noOriginPreflight.status, 403);
 });
 
 test('rectangle remains valid across the date line and at the poles', () => {

@@ -359,6 +359,19 @@
 </div>
 
 <div class="container">
+  <section id="searchQuota" class="quota-panel" aria-labelledby="quotaTitle">
+    <div class="quota-heading">
+      <h2 id="quotaTitle">お店検索の利用回数</h2>
+      <button id="quotaRefreshBtn" type="button">更新</button>
+    </div>
+    <dl class="quota-cards" aria-live="polite" aria-atomic="true">
+      <div class="quota-card"><dt>今月の使用回数</dt><dd id="quotaMonthUsed">確認中…</dd><small>月600回まで</small></div>
+      <div class="quota-card quota-card-remaining"><dt>今月の残り</dt><dd id="quotaMonthRemaining">確認中…</dd><small>全利用者の合計</small></div>
+      <div class="quota-card quota-card-day"><dt>今日の残り</dt><dd id="quotaDayRemaining">確認中…</dd><small>1日20回まで</small></div>
+    </dl>
+    <p id="quotaStatus" class="quota-status" role="status">利用回数を確認中です。</p>
+    <p class="quota-note">失敗した検索も回数に含みます。日・月の切り替えは米国太平洋時間です。回数の更新では検索を消費しません。</p>
+  </section>
   <div id="gachaPanel" class="gacha-panel">
   <div class="wheel-wrapper">
     <div class="pointer"></div>
@@ -418,6 +431,8 @@
         <div class="filter-grid">
           <label for="minRating">評価
             <select id="minRating" name="minRating">
+              <option value="0">指定なし</option>
+              <option value="3.5">★3.5以上</option>
               <option value="4" selected>★4.0以上</option>
               <option value="4.2">★4.2以上</option>
               <option value="4.5">★4.5以上</option>
@@ -425,14 +440,18 @@
           </label>
           <label for="minReviews">口コミ件数
             <select id="minReviews" name="minReviews">
+              <option value="0">指定なし</option>
               <option value="50">50件以上</option>
               <option value="100" selected>100件以上</option>
               <option value="300">300件以上</option>
               <option value="500">500件以上</option>
+              <option value="1000">1000件以上</option>
             </select>
           </label>
           <label for="radiusKm">現在地からの距離
             <select id="radiusKm" name="radiusKm">
+              <option value="0.1">100m以内</option>
+              <option value="0.5">500m以内</option>
               <option value="1">1km以内</option>
               <option value="3">3km以内</option>
               <option value="5" selected>5km以内</option>
@@ -452,7 +471,6 @@
       <p class="search-hint">検索時に現在地を使用します。距離は直線距離です。</p>
     </form>
     <div id="searchStatus" class="search-status" role="status" aria-live="polite"></div>
-    <p id="searchQuota" class="search-hint" aria-live="polite" hidden></p>
     <section id="searchResults" aria-labelledby="resultsTitle" hidden>
       <div class="results-heading"><h3 id="resultsTitle"></h3><span class="google-attribution" translate="no">Google Maps</span></div>
       <p id="resultCriteria" class="search-hint"></p>
@@ -815,3 +833,4 @@ resizeCanvas();
 
 </body>
 </html>
+
