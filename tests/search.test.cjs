@@ -42,14 +42,16 @@ function adapterHarness({ configured = true, config, fetch, timers, page = 'http
 
 function uiHarness(api, { genres = ['うどん'], getLocation } = {}) {
   class Element {
-    constructor(tag = 'div') { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.textContent = ''; this.value = ''; }
+    constructor(tag = 'div') { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.textContent = ''; this.value = ''; this.validity = { badInput: false }; }
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
     setAttribute(name, value) { this[name] = value; }
     removeAttribute(name) { delete this[name]; }
     addEventListener(name, callback) { this.listeners[name] = callback; }
     querySelectorAll() { return this.children.flatMap(child => [child, ...child.querySelectorAll()]); }
-    focus() {}
+    setCustomValidity(message) { this.validationMessage = message; }
+    reportValidity() { this.validityReported = true; return !this.validationMessage; }
+    focus() { this.focused = true; }
   }
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const elements = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(match => [match[1], new Element()]));
@@ -57,7 +59,7 @@ function uiHarness(api, { genres = ['うどん'], getLocation } = {}) {
   Object.assign(elements.minReviews, { value: '0' });
   Object.assign(elements.radiusKm, { value: '0.1' });
   Object.assign(elements.sortOrder, { value: 'rating' });
-  elements.restaurantSearchForm.children = ['genreGrid', 'genreInput', 'minRating', 'minReviews', 'radiusKm', 'sortOrder', 'searchBtn'].map(id => elements[id]);
+  elements.restaurantSearchForm.children = ['genreGrid', 'genreInput', 'minRating', 'minRatingCustom', 'minReviews', 'minReviewsCustom', 'radiusKm', 'radiusKmCustom', 'sortOrder', 'searchBtn'].map(id => elements[id]);
   const window = {};
   const document = {
     getElementById: id => elements[id],
@@ -620,5 +622,144 @@ test('a replacement genre during a pending search discards its results and preve
   assert.equal(ui.elements.searchResults.hidden, true);
   assert.equal(ui.elements.restaurantList.children.length, 0);
   assert.deepEqual(ui.elements.genreGrid.children.map(button => button['aria-pressed']), ['false', 'false', 'true']);
+});
+
+test('custom numeric conditions send the exact decimal and integer values entered', async () => {
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+    ? response({ quota: quota() }) : response({ places: [], quota: quota({ dayUsed: 2, monthUsed: 2 }) }) });
+  const ui = uiHarness(adapter.api);
+  for (const [id, value] of [['minRating', '4.25'], ['minReviews', '7500'], ['radiusKm', '1.25']]) {
+    ui.elements[id].value = 'custom';
+    ui.elements[id].listeners.change();
+    const field = ui.elements[`${id}Custom`];
+    field.value = value;
+    field.listeners.input();
+    assert.equal(ui.elements[`${id}CustomField`].hidden, false);
+    assert.equal(field.required, true);
+    assert.equal(field.disabled, false);
+  }
+  await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  const posts = adapter.requests.filter(({ options }) => options.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.deepEqual(JSON.parse(posts[0].options.body).criteria, { minRating: 4.25, minReviews: 7500, radiusKm: 1.25, sort: 'rating' });
+  assert.equal(ui.locationCalls, 1);
+  assert.equal(ui.elements.minRatingCustom.disabled, false);
+  assert.equal(ui.elements.quotaMonthUsed.textContent, '2回');
+});
+
+test('blank, malformed, out-of-range and fractional review input stops before location or search', async () => {
+  for (const [id, value] of [
+    ['minRating', ''], ['minRating', '   '], ['minRating', 'abc'], ['minRating', 'Infinity'], ['minRating', '0x4'],
+    ['minRating', '-0.01'], ['minRating', '5.01'],
+    ['minReviews', ''], ['minReviews', '-1'], ['minReviews', '1000001'], ['minReviews', '100.5'],
+    ['radiusKm', ''], ['radiusKm', '0.09'], ['radiusKm', '50.01'], ['radiusKm', '1e999']
+  ]) {
+    const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: () => response({ quota: quota() }) });
+    const ui = uiHarness(adapter.api);
+    ui.elements[id].value = 'custom';
+    ui.elements[id].listeners.change();
+    const field = ui.elements[`${id}Custom`];
+    field.value = value;
+    field.listeners.input();
+    await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+    assert.equal(ui.locationCalls, 0, `${id}: ${value}`);
+    assert.equal(adapter.requests.some(({ options }) => options.method === 'POST'), false, `${id}: ${value}`);
+    assert.equal(ui.elements.searchStatus.dataset.state, 'error');
+    assert.equal(field['aria-invalid'], 'true');
+    assert.equal(field.focused, true);
+    assert.equal(field.validityReported, true);
+    assert.ok(field.validationMessage);
+  }
+});
+
+test('inclusive custom boundaries are accepted without substituting defaults', async () => {
+  for (const values of [{ minRating: 0, minReviews: 0, radiusKm: 0.1 }, { minRating: 5, minReviews: 1000000, radiusKm: 50 }]) {
+    const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+      ? response({ quota: quota() }) : response({ places: [], quota: quota() }) });
+    const ui = uiHarness(adapter.api);
+    for (const [id, value] of Object.entries(values)) {
+      ui.elements[id].value = 'custom';
+      ui.elements[id].listeners.change();
+      ui.elements[`${id}Custom`].value = String(value);
+    }
+    await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+    const post = adapter.requests.find(({ options }) => options.method === 'POST');
+    assert.ok(post);
+    assert.deepEqual(JSON.parse(post.options.body).criteria, { ...values, sort: 'rating' });
+  }
+});
+
+test('preset restoration excludes stale custom validation and busy state only re-enables selected custom fields', async () => {
+  let resolveSearch;
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => options.method === 'GET'
+    ? response({ quota: quota() }) : new Promise(resolve => { resolveSearch = resolve; }) });
+  const ui = uiHarness(adapter.api);
+  for (const id of ['minRating', 'minReviews', 'radiusKm']) {
+    assert.equal(ui.elements[`${id}Custom`].disabled, true);
+    assert.equal(ui.elements[`${id}Custom`].required, false);
+  }
+  ui.elements.minReviews.value = 'custom';
+  ui.elements.minReviews.listeners.change();
+  ui.elements.minReviewsCustom.value = '100.5';
+  await ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  assert.ok(ui.elements.minReviewsCustom.validationMessage);
+  ui.elements.minReviews.value = '5000';
+  ui.elements.minReviews.listeners.change();
+  assert.equal(ui.elements.minReviewsCustomField.hidden, true);
+  assert.equal(ui.elements.minReviewsCustom.validationMessage, '');
+  assert.equal(ui.elements.minReviewsCustom.required, false);
+  ui.elements.minRating.value = 'custom';
+  ui.elements.minRating.listeners.change();
+  ui.elements.minRatingCustom.value = '4.25';
+  ui.elements.radiusKm.value = '1';
+  const pending = ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.elements.minRatingCustom.disabled, true);
+  assert.equal(ui.elements.minReviewsCustom.disabled, true);
+  const post = adapter.requests.find(({ options }) => options.method === 'POST');
+  assert.deepEqual(JSON.parse(post.options.body).criteria, { minRating: 4.25, minReviews: 5000, radiusKm: 1, sort: 'rating' });
+  resolveSearch(response());
+  await pending;
+  assert.equal(ui.elements.minRatingCustom.disabled, false);
+  assert.equal(ui.elements.minReviewsCustom.disabled, true);
+  assert.equal(ui.elements.radiusKmCustom.disabled, true);
+  ui.elements.minRating.value = '4';
+  ui.elements.minRating.listeners.change();
+  assert.equal(ui.elements.minRatingCustomField.hidden, true);
+  assert.equal(ui.elements.minRatingCustom.required, false);
+  assert.equal(ui.elements.minRatingCustom.disabled, true);
+  ui.elements.minRating.value = 'custom';
+  ui.elements.minRating.listeners.change();
+  assert.equal(ui.elements.minRatingCustom.value, '4.25', 'custom value remains available on returning');
+  assert.equal(ui.elements.minRatingCustom.disabled, false);
+});
+
+test('custom edits invalidate displayed partial results and stop following genre requests', async () => {
+  let resolveSecond;
+  let posts = 0;
+  const adapter = adapterHarness({ page: 'https://lunch.example.workers.dev/', fetch: (_url, options) => {
+    if (options.method === 'GET') return response({ quota: quota() });
+    posts++;
+    return posts === 1 ? response() : new Promise(resolve => { resolveSecond = resolve; });
+  } });
+  const ui = uiHarness(adapter.api, { genres: ['うどん', 'ラーメン', 'カレー'] });
+  ui.elements.genreGrid.children[1].listeners.click();
+  ui.elements.genreGrid.children[2].listeners.click();
+  ui.elements.radiusKm.value = 'custom';
+  ui.elements.radiusKm.listeners.change();
+  ui.elements.radiusKmCustom.value = '1.2';
+  const pending = ui.elements.restaurantSearchForm.listeners.submit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(posts, 2);
+  assert.equal(ui.elements.searchResults.hidden, false);
+  ui.elements.radiusKmCustom.value = '2.5';
+  ui.elements.radiusKmCustom.listeners.input();
+  assert.equal(ui.elements.searchResults.hidden, true);
+  assert.equal(ui.elements.restaurantList.children.length, 0);
+  resolveSecond(response());
+  await pending;
+  assert.equal(posts, 2, 'the third genre never starts after conditions change');
+  assert.equal(ui.elements.searchResults.hidden, true);
+  assert.equal(ui.elements.radiusKmCustom.disabled, false);
 });
 

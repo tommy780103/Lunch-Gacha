@@ -406,7 +406,7 @@
     <p class="eyebrow">今日の気分から</p>
     <h2 id="searchTitle">評判のお店を探す</h2>
     <p class="search-intro">好きなジャンルと条件を選んで、近くのお店を検索。</p>
-    <form id="restaurantSearchForm">
+    <form id="restaurantSearchForm" novalidate>
       <fieldset class="genre-fieldset">
         <legend>1. ジャンルを選ぶ（複数選択できます）</legend>
         <div id="genreGrid" class="genre-grid"></div>
@@ -417,16 +417,24 @@
       <fieldset class="filter-fieldset">
         <legend>2. お店の条件</legend>
         <div class="filter-grid">
-          <label for="minRating">評価
+          <div class="filter-control">
+            <label for="minRating">評価</label>
             <select id="minRating" name="minRating">
               <option value="0">指定なし</option>
               <option value="3.5">★3.5以上</option>
               <option value="4" selected>★4.0以上</option>
               <option value="4.2">★4.2以上</option>
               <option value="4.5">★4.5以上</option>
+              <option value="custom">自分で入力</option>
             </select>
-          </label>
-          <label for="minReviews">口コミ件数
+            <div id="minRatingCustomField" class="custom-filter" hidden>
+              <label for="minRatingCustom">評価の下限（★）</label>
+              <input id="minRatingCustom" name="minRatingCustom" type="number" inputmode="decimal" min="0" max="5" step="any" placeholder="例：4.3" aria-describedby="minRatingCustomHint" disabled>
+              <p id="minRatingCustomHint">0〜5・小数可。0は指定なし。</p>
+            </div>
+          </div>
+          <div class="filter-control">
+            <label for="minReviews">口コミ件数</label>
             <select id="minReviews" name="minReviews">
               <option value="0">指定なし</option>
               <option value="50">50件以上</option>
@@ -434,9 +442,17 @@
               <option value="300">300件以上</option>
               <option value="500">500件以上</option>
               <option value="1000">1000件以上</option>
+              <option value="5000">5,000件以上</option>
+              <option value="custom">自分で入力</option>
             </select>
-          </label>
-          <label for="radiusKm">現在地からの距離
+            <div id="minReviewsCustomField" class="custom-filter" hidden>
+              <label for="minReviewsCustom">口コミ件数の下限（件）</label>
+              <input id="minReviewsCustom" name="minReviewsCustom" type="number" inputmode="numeric" min="0" max="1000000" step="1" placeholder="例：750" aria-describedby="minReviewsCustomHint" disabled>
+              <p id="minReviewsCustomHint">0〜1,000,000件・整数。0は指定なし。</p>
+            </div>
+          </div>
+          <div class="filter-control">
+            <label for="radiusKm">現在地からの距離</label>
             <select id="radiusKm" name="radiusKm">
               <option value="0.1">100m以内</option>
               <option value="0.5">500m以内</option>
@@ -444,8 +460,14 @@
               <option value="3">3km以内</option>
               <option value="5">5km以内</option>
               <option value="10">10km以内</option>
+              <option value="custom">自分で入力</option>
             </select>
-          </label>
+            <div id="radiusKmCustomField" class="custom-filter" hidden>
+              <label for="radiusKmCustom">距離の上限（km）</label>
+              <input id="radiusKmCustom" name="radiusKmCustom" type="number" inputmode="decimal" min="0.1" max="50" step="any" placeholder="例：2.5" aria-describedby="radiusKmCustomHint" disabled>
+              <p id="radiusKmCustomHint">0.1〜50km・小数可。直線距離です。</p>
+            </div>
+          </div>
           <label for="sortOrder">並び順
             <select id="sortOrder" name="sortOrder">
               <option value="rating">評価が高い順</option>

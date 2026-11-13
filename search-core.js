@@ -34,10 +34,15 @@
 
   function describeCriteria(criteria) {
     const filters = normalizeCriteria(criteria);
-    const rating = filters.minRating === 0 ? '評価指定なし' : `★${filters.minRating.toFixed(1)}以上`;
+    const ratingValue = Number.isInteger(filters.minRating) ? filters.minRating.toFixed(1) : String(filters.minRating);
+    const rating = filters.minRating === 0 ? '評価指定なし' : `★${ratingValue}以上`;
     const reviews = filters.minReviews === 0 ? '口コミ指定なし' : `口コミ${filters.minReviews.toLocaleString('ja-JP')}件以上`;
     const sort = { rating: '評価が高い順', reviews: '口コミが多い順', distance: '近い順' }[filters.sort];
-    return `${rating}・${reviews}・${formatDistance(filters.radiusKm)}以内 ／ ${sort}`;
+    // Search thresholds must show the exact custom value, unlike the rounded
+    // distance estimates on individual restaurant cards.
+    const metres = filters.radiusKm * 1000;
+    const radius = filters.radiusKm < 1 && Number.isInteger(metres) ? `${metres}m` : `${filters.radiusKm}km`;
+    return `${rating}・${reviews}・${radius}以内 ／ ${sort}`;
   }
 
   function coordinates(value) {

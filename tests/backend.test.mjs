@@ -368,6 +368,88 @@ test('new filter choices preserve values and omit the Google rating restriction 
   assert.equal(unrated.userRatingCount, undefined);
 });
 
+test('custom filter numbers and inclusive bounds survive public routing without preset rounding', async () => {
+  for (const [criteria, googleRating] of [
+    [{ minRating: 4.35, minReviews: 5678, radiusKm: 1.25, sort: 'distance' }, 4],
+    [{ minRating: 4.35, minReviews: 5000, radiusKm: 1.25, sort: 'reviews' }, 4],
+    [{ minRating: 0, minReviews: 0, radiusKm: 0.1, sort: 'rating' }, undefined],
+    [{ minRating: 5, minReviews: 1000000, radiusKm: 50, sort: 'rating' }, 5]
+  ]) {
+    const body = { ...input, criteria };
+    assert.deepEqual(validateSearchInput(body).criteria, criteria);
+    const storage = new MemoryStorage();
+    let routed = 0;
+    let googleCalls = 0;
+    const boundEnv = { ...env, GLOBAL_QUOTA: {
+      idFromName: name => { assert.equal(name, GLOBAL_OBJECT_NAME); return 'fixed-id'; },
+      get: id => {
+        assert.equal(id, 'fixed-id');
+        return { fetch: async internal => {
+          routed++;
+          assert.deepEqual(await internal.clone().json(), body);
+          return handleQuotaRequest(internal, boundEnv, {
+            storage, now, fetchImpl: async (url, init) => {
+              googleCalls++;
+              assert.equal(url, GOOGLE_ENDPOINT);
+              const googleBody = JSON.parse(init.body);
+              // Google receives a wider half-star filter; the adapter applies
+              // the exact custom minimum after the response is normalized.
+              assert.equal(googleBody.minRating, googleRating);
+              assert.equal(Object.hasOwn(googleBody, 'minRating'), googleRating !== undefined);
+              const rectangle = googleBody.locationRestriction.rectangle;
+              const radiusFromLatitude = (rectangle.high.latitude - rectangle.low.latitude) / 2 * Math.PI / 180 * 6371.0088;
+              assert.ok(Math.abs(radiusFromLatitude - criteria.radiusKm) < 1e-9);
+              assert.equal(googleBody.pageSize, 20);
+              return googleSuccess();
+            }
+          });
+        } };
+      }
+    } };
+    const result = await handlePublicRequest(request(body), boundEnv);
+    assert.equal(result.status, 200);
+    assert.deepEqual((await result.json()).quota, { dayUsed: 1, dayLimit: 20, monthUsed: 1, monthLimit: 600 });
+    assert.equal(routed, 1);
+    assert.equal(googleCalls, 1);
+    assert.equal(storage.committed, 1);
+    assert.equal(storage.synced, 1);
+  }
+});
+
+test('invalid custom filter numbers fail before object routing, Google or quota reservation', async () => {
+  const previous = { version: 1, day: '2026-11-11', month: '2026-11', dayUsed: 3, monthUsed: 42 };
+  const storage = new MemoryStorage(previous);
+  let objectAccesses = 0;
+  let googleCalls = 0;
+  const boundEnv = { ...env, GLOBAL_QUOTA: {
+    idFromName: () => { objectAccesses++; throw new Error('Invalid input must not reach the quota object'); }
+  } };
+  for (const [key, values] of [
+    ['minRating', [-0.01, 5.01, '4.35', null]],
+    ['minReviews', [-1, 1000001, 5678.1, '5678', null]],
+    ['radiusKm', [0.099, 50.001, '1.25', null]]
+  ]) {
+    for (const value of values) {
+      const body = { ...input, criteria: { ...input.criteria, [key]: value } };
+      const publicResult = await handlePublicRequest(request(body), boundEnv);
+      const internalResult = await handleQuotaRequest(request(body), env, {
+        storage, now, fetchImpl: async () => { googleCalls++; return googleSuccess(); }
+      });
+      for (const result of [publicResult, internalResult]) {
+        assert.equal(result.status, 400, `${key}: ${JSON.stringify(value)}`);
+        const payload = await result.json();
+        assert.equal(payload.error.code, 'INVALID_REQUEST');
+        assert.equal(Object.hasOwn(payload, 'quota'), false);
+      }
+    }
+  }
+  assert.equal(objectAccesses, 0);
+  assert.equal(googleCalls, 0);
+  assert.equal(storage.committed, 0);
+  assert.equal(storage.synced, 0);
+  assert.deepEqual(storage.state, previous);
+});
+
 test('body size is enforced for streamed bodies without Content-Length', async () => {
   let cancelled = false;
   const streamed = new Request('https://search.example/search', {

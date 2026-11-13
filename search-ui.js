@@ -7,6 +7,49 @@
   let origin = null;
   const selectedGenres = new Set();
   const byId = id => document.getElementById(id);
+  const numericFilters = [
+    { id: 'minRating', min: 0, max: 5, message: '評価は0〜5の数値で入力してください。' },
+    { id: 'minReviews', min: 0, max: 1000000, integer: true, message: '口コミ件数は0〜1,000,000の整数で入力してください。' },
+    { id: 'radiusKm', min: 0.1, max: 50, message: '距離は0.1〜50kmの数値で入力してください。' }
+  ];
+
+  function syncCustomFilters() {
+    for (const { id } of numericFilters) {
+      const selected = byId(id).value === 'custom';
+      const input = byId(`${id}Custom`);
+      byId(`${id}CustomField`).hidden = !selected;
+      input.disabled = busy || !selected;
+      input.required = selected;
+      if (!selected) {
+        input.setCustomValidity('');
+        input.removeAttribute('aria-invalid');
+      }
+    }
+  }
+
+  function readCriteria() {
+    const values = { sort: byId('sortOrder').value };
+    for (const { id, min, max, integer, message } of numericFilters) {
+      const field = byId(id).value === 'custom' ? byId(`${id}Custom`) : byId(id);
+      const raw = field.value.trim();
+      const value = Number(raw);
+      // Validate before normalization: a blank, invalid or out-of-range custom
+      // value must never silently become a default, rounded value or bound.
+      const numeric = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(raw);
+      if (!numeric || field.validity?.badInput || !Number.isFinite(value) || value < min || value > max || (integer && !Number.isSafeInteger(value))) {
+        field.setCustomValidity(message);
+        field.setAttribute('aria-invalid', 'true');
+        setStatus(message, 'error');
+        field.focus();
+        field.reportValidity();
+        return null;
+      }
+      field.setCustomValidity('');
+      field.removeAttribute('aria-invalid');
+      values[id] = value;
+    }
+    return LunchSearchCore.normalizeCriteria(values);
+  }
 
   function setStatus(message, state = 'ready') {
     byId('searchStatus').textContent = message;
@@ -92,6 +135,7 @@
     byId('restaurantSearchForm').querySelectorAll('input, select, button').forEach(control => {
       control.disabled = value;
     });
+    syncCustomFilters();
     byId('searchBtn').textContent = value ? 'お店を探しています…' : 'この条件でお店を検索';
     byId('searchPanel').setAttribute('aria-busy', String(value));
     updateQuota();
@@ -198,17 +242,13 @@
       byId('genreInput').focus();
       return;
     }
+    const criteria = readCriteria();
+    if (!criteria) return;
     clearResults();
     if (!LunchPlaces.isConfigured()) {
       readyMessage();
       return;
     }
-    const criteria = LunchSearchCore.normalizeCriteria({
-      minRating: Number(byId('minRating').value),
-      minReviews: Number(byId('minReviews').value),
-      radiusKm: Number(byId('radiusKm').value),
-      sort: byId('sortOrder').value
-    });
     const requestGeneration = generation;
     const groups = [];
     setBusy(true);
@@ -278,10 +318,25 @@
       readyMessage();
     });
     ['minRating', 'minReviews', 'radiusKm', 'sortOrder'].forEach(id => {
-      byId(id).addEventListener('change', () => { clearResults(); readyMessage(); });
+      byId(id).addEventListener('change', () => {
+        byId(id).setCustomValidity('');
+        byId(id).removeAttribute('aria-invalid');
+        syncCustomFilters();
+        clearResults();
+        readyMessage();
+      });
     });
+    for (const { id } of numericFilters) {
+      byId(`${id}Custom`).addEventListener('input', () => {
+        byId(`${id}Custom`).setCustomValidity('');
+        byId(`${id}Custom`).removeAttribute('aria-invalid');
+        clearResults();
+        readyMessage();
+      });
+    }
     byId('restaurantSearchForm').addEventListener('submit', search);
     byId('quotaRefreshBtn').addEventListener('click', refreshQuota);
+    syncCustomFilters();
     chooseGenre(settings.genres[0]);
     refreshQuota();
   }
