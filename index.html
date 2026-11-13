@@ -520,8 +520,9 @@
 const LUNCH_ITEMS = [
   'うどん', 'ラーメン', '寿司', '焼肉', 'マック',
   '定食', 'パスタ', 'カレー', '中華', '丼もの',
-  'ピザ', '弁当', 'パン'
+  'ピザ', '弁当', 'パン', 'コーヒー'
 ];
+const DEFAULT_LUNCH_SELECTION = new Set(['ラーメン', 'うどん', '定食', 'パスタ', '中華']);
 
 const COLORS = [
   '#ff6b6b', '#ee5a24', '#ffa940', '#4ecdc4', '#2eaf7d',
@@ -531,10 +532,10 @@ const COLORS = [
 
 let allLunchItems = [...LUNCH_ITEMS];
 let lunchSelected = {};
-allLunchItems.forEach(item => lunchSelected[item] = true);
+allLunchItems.forEach(item => lunchSelected[item] = DEFAULT_LUNCH_SELECTION.has(item));
 let userAddedItems = new Set();
 
-let items = [...allLunchItems];
+let items = allLunchItems.filter(item => lunchSelected[item]);
 let currentTab = 'lunch';
 let spinning = false;
 let currentAngle = 0;
