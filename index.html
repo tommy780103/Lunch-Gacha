@@ -757,12 +757,17 @@ function setGachaBusy(busy) {
     .forEach(control => { control.disabled = busy; });
 }
 
-function buildLunchGrid() {
+function buildLunchGrid(focusName) {
   const grid = document.getElementById('lunchGrid');
   grid.innerHTML = '';
-  allLunchItems.forEach(name => {
+  const orderedItems = [
+    ...allLunchItems.filter(name => lunchSelected[name]),
+    ...allLunchItems.filter(name => !lunchSelected[name])
+  ];
+  orderedItems.forEach(name => {
     const btn = document.createElement('button');
     btn.className = 'item-toggle' + (lunchSelected[name] ? ' active' : '');
+    btn.setAttribute('aria-pressed', String(lunchSelected[name]));
     btn.appendChild(document.createTextNode(name));
 
     if (userAddedItems.has(name)) {
@@ -775,10 +780,11 @@ function buildLunchGrid() {
 
     btn.onclick = () => {
       lunchSelected[name] = !lunchSelected[name];
-      btn.classList.toggle('active');
+      buildLunchGrid(name);
       updateLunchItems();
     };
     grid.appendChild(btn);
+    if (name === focusName) btn.focus({ preventScroll: true });
   });
 }
 
