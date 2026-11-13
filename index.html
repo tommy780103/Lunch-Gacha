@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0f0f1a">
-<meta name="apple-mobile-web-app-title" content="ランチガチャ">
+<meta name="apple-mobile-web-app-title" content="きょうめし">
 <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="48x48" href="./icons/favicon.png">
 <link rel="icon" type="image/svg+xml" href="./icons/app-icon.svg">
-<title>ランチガチャ - 今日なに食べる？</title>
+<title>きょうめし - まわして決める。選んで探す。</title>
 <link rel="stylesheet" href="./search.css">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -348,14 +348,14 @@
 <body>
 
 <div class="app-header">
-  <h1>ランチガチャ</h1>
-  <p>まわして決める。選んで探す。今日のおいしい一軒へ。</p>
+  <h1 id="appTitle">きょうめし</h1>
+  <p id="appSubtitle">まわして決める。選んで探す。</p>
 </div>
 
 <div class="tabs" aria-label="機能を選ぶ">
   <button class="tab active" data-tab="lunch" aria-pressed="true" onclick="switchTab('lunch')">ガチャ</button>
   <button class="tab" data-tab="search" aria-pressed="false" onclick="switchTab('search')">お店検索</button>
-  <button class="tab" data-tab="custom" aria-pressed="false" onclick="switchTab('custom')">カスタム</button>
+  <button class="tab" data-tab="custom" aria-pressed="false" onclick="switchTab('custom')">ルーレット</button>
 </div>
 
 <div class="container">
@@ -406,39 +406,68 @@
     <p class="eyebrow">今日の気分から</p>
     <h2 id="searchTitle">評判のお店を探す</h2>
     <p class="search-intro">好きなジャンルと条件を選んで、近くのお店を検索。</p>
-    <form id="restaurantSearchForm">
+    <form id="restaurantSearchForm" novalidate>
       <fieldset class="genre-fieldset">
-        <legend>1. ジャンルを選ぶ</legend>
+        <legend>1. ジャンルを選ぶ（複数選択できます）</legend>
         <div id="genreGrid" class="genre-grid"></div>
-        <label class="free-genre-label" for="genreInput">検索するジャンル・店名（編集できます）</label>
-        <input id="genreInput" name="genre" type="text" maxlength="80" placeholder="例：そば、ハンバーグ" autocomplete="off" required>
+        <label class="free-genre-label" for="genreInput">追加のジャンル・店名（任意）</label>
+        <input id="genreInput" name="genre" type="text" maxlength="80" placeholder="例：そば（入力は1ジャンル分）" autocomplete="off">
+        <p id="genreSelectionSummary" class="genre-selection-summary" aria-live="polite"></p>
       </fieldset>
       <fieldset class="filter-fieldset">
         <legend>2. お店の条件</legend>
         <div class="filter-grid">
-          <label for="minRating">評価
+          <div class="filter-control">
+            <label for="minRating">評価</label>
             <select id="minRating" name="minRating">
+              <option value="0">指定なし</option>
+              <option value="3.5">★3.5以上</option>
               <option value="4" selected>★4.0以上</option>
               <option value="4.2">★4.2以上</option>
               <option value="4.5">★4.5以上</option>
+              <option value="custom">自分で入力</option>
             </select>
-          </label>
-          <label for="minReviews">口コミ件数
+            <div id="minRatingCustomField" class="custom-filter" hidden>
+              <label for="minRatingCustom">評価の下限（★）</label>
+              <input id="minRatingCustom" name="minRatingCustom" type="number" inputmode="decimal" min="0" max="5" step="any" placeholder="例：4.3" aria-describedby="minRatingCustomHint" disabled>
+              <p id="minRatingCustomHint">0〜5・小数可。0は指定なし。</p>
+            </div>
+          </div>
+          <div class="filter-control">
+            <label for="minReviews">口コミ件数</label>
             <select id="minReviews" name="minReviews">
+              <option value="0">指定なし</option>
               <option value="50">50件以上</option>
               <option value="100" selected>100件以上</option>
               <option value="300">300件以上</option>
               <option value="500">500件以上</option>
+              <option value="1000">1000件以上</option>
+              <option value="5000">5,000件以上</option>
+              <option value="custom">自分で入力</option>
             </select>
-          </label>
-          <label for="radiusKm">現在地からの距離
+            <div id="minReviewsCustomField" class="custom-filter" hidden>
+              <label for="minReviewsCustom">口コミ件数の下限（件）</label>
+              <input id="minReviewsCustom" name="minReviewsCustom" type="number" inputmode="numeric" min="0" max="1000000" step="1" placeholder="例：750" aria-describedby="minReviewsCustomHint" disabled>
+              <p id="minReviewsCustomHint">0〜1,000,000件・整数。0は指定なし。</p>
+            </div>
+          </div>
+          <div class="filter-control">
+            <label for="radiusKm">現在地からの距離</label>
             <select id="radiusKm" name="radiusKm">
-              <option value="1">1km以内</option>
+              <option value="0.1">100m以内</option>
+              <option value="0.5">500m以内</option>
+              <option value="1" selected>1km以内</option>
               <option value="3">3km以内</option>
-              <option value="5" selected>5km以内</option>
+              <option value="5">5km以内</option>
               <option value="10">10km以内</option>
+              <option value="custom">自分で入力</option>
             </select>
-          </label>
+            <div id="radiusKmCustomField" class="custom-filter" hidden>
+              <label for="radiusKmCustom">距離の上限（km）</label>
+              <input id="radiusKmCustom" name="radiusKmCustom" type="number" inputmode="decimal" min="0.1" max="50" step="any" placeholder="例：2.5" aria-describedby="radiusKmCustomHint" disabled>
+              <p id="radiusKmCustomHint">0.1〜50km・小数可。直線距離です。</p>
+            </div>
+          </div>
           <label for="sortOrder">並び順
             <select id="sortOrder" name="sortOrder">
               <option value="rating">評価が高い順</option>
@@ -452,11 +481,11 @@
       <p class="search-hint">検索時に現在地を使用します。距離は直線距離です。</p>
     </form>
     <div id="searchStatus" class="search-status" role="status" aria-live="polite"></div>
-    <p id="searchQuota" class="search-hint" aria-live="polite" hidden></p>
     <section id="searchResults" aria-labelledby="resultsTitle" hidden>
       <div class="results-heading"><h3 id="resultsTitle"></h3><span class="google-attribution" translate="no">Google Maps</span></div>
+      <p id="resultGenres" class="search-hint"></p>
       <p id="resultCriteria" class="search-hint"></p>
-      <p class="search-hint">取得できた候補の中から、条件に合うお店を最大10件表示します。</p>
+      <p class="search-hint">検索したジャンル全体から、条件に合うお店を最大10件表示します。「検索ジャンル」は検索に使った言葉で、お店の公式カテゴリではありません。</p>
       <ol id="restaurantList" class="restaurant-list"></ol>
       <a id="shortlistLink" class="primary-action shortlist-link" target="_blank" rel="noopener noreferrer" hidden>候補店をまとめてGoogleマップで開く</a>
     </section>
@@ -464,6 +493,19 @@
       <a id="normalSearchLink" target="_blank" rel="noopener noreferrer">通常のGoogleマップ検索を開く ↗</a>
       <p>このリンクには、評価・口コミ件数の条件は適用されません。</p>
     </div>
+  </section>
+  <section id="searchQuota" class="quota-panel" aria-labelledby="quotaTitle">
+    <div class="quota-heading">
+      <h2 id="quotaTitle">お店検索の利用回数</h2>
+      <button id="quotaRefreshBtn" type="button">更新</button>
+    </div>
+    <dl class="quota-cards" aria-live="polite" aria-atomic="true">
+      <div class="quota-card"><dt>今月の使用回数</dt><dd id="quotaMonthUsed">確認中…</dd><small>月600回まで</small></div>
+      <div class="quota-card quota-card-remaining"><dt>今月の残り</dt><dd id="quotaMonthRemaining">確認中…</dd><small>全利用者の合計</small></div>
+      <div class="quota-card quota-card-day"><dt>今日の残り</dt><dd id="quotaDayRemaining">確認中…</dd><small>1日20回まで</small></div>
+    </dl>
+    <p id="quotaStatus" class="quota-status" role="status">利用回数を確認中です。</p>
+    <p class="quota-note">失敗した検索も回数に含みます。日・月の切り替えは米国太平洋時間です。回数の更新では検索を消費しません。</p>
   </section>
 </div>
 
@@ -478,8 +520,9 @@
 const LUNCH_ITEMS = [
   'うどん', 'ラーメン', '寿司', '焼肉', 'マック',
   '定食', 'パスタ', 'カレー', '中華', '丼もの',
-  'ピザ', '弁当', 'パン'
+  'ピザ', '弁当', 'パン', 'コーヒー'
 ];
+const DEFAULT_LUNCH_SELECTION = new Set(['ラーメン', 'うどん', '定食', 'パスタ', '中華']);
 
 const COLORS = [
   '#ff6b6b', '#ee5a24', '#ffa940', '#4ecdc4', '#2eaf7d',
@@ -489,15 +532,17 @@ const COLORS = [
 
 let allLunchItems = [...LUNCH_ITEMS];
 let lunchSelected = {};
-allLunchItems.forEach(item => lunchSelected[item] = true);
+allLunchItems.forEach(item => lunchSelected[item] = DEFAULT_LUNCH_SELECTION.has(item));
 let userAddedItems = new Set();
 
-let items = [...allLunchItems];
+let items = allLunchItems.filter(item => lunchSelected[item]);
 let currentTab = 'lunch';
 let spinning = false;
 let currentAngle = 0;
 let userLat = null;
 let userLng = null;
+const defaultDocumentTitle = document.title;
+const defaultAppTitle = document.getElementById('appTitle').textContent;
 
 const canvas = document.getElementById('wheelCanvas');
 const ctx = canvas.getContext('2d');
@@ -554,8 +599,9 @@ function getLocation() {
 
 function drawWheel() {
   const n = items.length;
-  const arc = (2 * Math.PI) / n;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!n) return;
+  const arc = (2 * Math.PI) / n;
 
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.4)';
@@ -611,9 +657,7 @@ function spin() {
   stopRequested = false;
   document.getElementById('spinBtn').style.display = 'none';
   document.getElementById('stopBtn').style.display = 'inline-block';
-  document.getElementById('result').textContent = '';
-  document.getElementById('mapBtn').style.display = 'none';
-  document.getElementById('resultSearchBtn').hidden = true;
+  clearResult();
 
   spinSpeed = 0.15 + Math.random() * 0.05;
   let lastTime = performance.now();
@@ -668,7 +712,9 @@ function decelerate() {
 }
 
 function showResult() {
+  clearResult();
   const n = items.length;
+  if (n < 2) return;
   const arc = (2 * Math.PI) / n;
   const pointerAngle = Math.PI * 1.5;
   let normalizedAngle = (pointerAngle - currentAngle % (Math.PI * 2) + Math.PI * 4) % (Math.PI * 2);
@@ -682,6 +728,8 @@ function showResult() {
   resultEl.offsetHeight;
   resultEl.style.animation = 'pop .4s ease';
 
+  // Generic roulette results are item names only, with no food-search action.
+  if (currentTab !== 'lunch') return;
   const mapBtn = document.getElementById('mapBtn');
   mapBtn.href = LunchSearchCore.buildSearchUrl(chosen, userLat !== null ? { lat: userLat, lng: userLng } : null);
   mapBtn.style.display = 'inline-block';
@@ -694,17 +742,32 @@ function showResult() {
   };
 }
 
+function clearResult() {
+  document.getElementById('result').textContent = '';
+  const mapBtn = document.getElementById('mapBtn');
+  mapBtn.style.display = 'none';
+  mapBtn.removeAttribute('href');
+  const searchBtn = document.getElementById('resultSearchBtn');
+  searchBtn.hidden = true;
+  searchBtn.onclick = null;
+}
+
 function setGachaBusy(busy) {
   document.querySelectorAll('.tabs button, #lunchSelectArea button, #lunchSelectArea input, #customArea button, #customArea textarea')
     .forEach(control => { control.disabled = busy; });
 }
 
-function buildLunchGrid() {
+function buildLunchGrid(focusName) {
   const grid = document.getElementById('lunchGrid');
   grid.innerHTML = '';
-  allLunchItems.forEach(name => {
+  const orderedItems = [
+    ...allLunchItems.filter(name => lunchSelected[name]),
+    ...allLunchItems.filter(name => !lunchSelected[name])
+  ];
+  orderedItems.forEach(name => {
     const btn = document.createElement('button');
     btn.className = 'item-toggle' + (lunchSelected[name] ? ' active' : '');
+    btn.setAttribute('aria-pressed', String(lunchSelected[name]));
     btn.appendChild(document.createTextNode(name));
 
     if (userAddedItems.has(name)) {
@@ -717,10 +780,11 @@ function buildLunchGrid() {
 
     btn.onclick = () => {
       lunchSelected[name] = !lunchSelected[name];
-      btn.classList.toggle('active');
+      buildLunchGrid(name);
       updateLunchItems();
     };
     grid.appendChild(btn);
+    if (name === focusName) btn.focus({ preventScroll: true });
   });
 }
 
@@ -753,24 +817,25 @@ function toggleAll(state) {
 function updateLunchItems() {
   const selected = allLunchItems.filter(name => lunchSelected[name]);
   const warn = document.getElementById('warnMsg');
-  if (selected.length < 2) {
-    warn.textContent = '2つ以上選んでください';
-    document.getElementById('spinBtn').disabled = true;
-    return;
-  }
-  warn.textContent = '';
-  items = selected;
+  const valid = selected.length >= 2;
+  warn.textContent = valid ? '' : '2つ以上選んでください';
+  document.getElementById('spinBtn').disabled = !valid;
+  items = valid ? selected : [];
   currentAngle = 0;
-  document.getElementById('result').textContent = '';
-  document.getElementById('mapBtn').style.display = 'none';
-  document.getElementById('resultSearchBtn').hidden = true;
-  document.getElementById('spinBtn').disabled = false;
+  clearResult();
   drawWheel();
 }
 
 function switchTab(tab) {
   if (spinning) return;
   currentTab = tab;
+  const roulette = tab === 'custom';
+  document.getElementById('appTitle').textContent = roulette ? 'ルーレット' : defaultAppTitle;
+  document.getElementById('appSubtitle').hidden = roulette;
+  document.title = roulette ? 'ルーレット' : defaultDocumentTitle;
+  document.getElementById('searchQuota').hidden = roulette;
+  document.getElementById('locationStatus').hidden = roulette;
+  clearResult();
   document.querySelectorAll('.tab').forEach(button => {
     const active = button.dataset.tab === tab;
     button.classList.toggle('active', active);
@@ -783,9 +848,6 @@ function switchTab(tab) {
   document.getElementById('customArea').style.display = tab === 'custom' ? 'block' : 'none';
   if (tab === 'lunch') updateLunchItems();
   else applyCustom();
-  document.getElementById('result').textContent = '';
-  document.getElementById('mapBtn').style.display = 'none';
-  document.getElementById('resultSearchBtn').hidden = true;
   currentAngle = 0;
   resizeCanvas();
 }
@@ -797,14 +859,10 @@ function applyCustom() {
   const valid = lines.length >= 2;
   document.getElementById('spinBtn').disabled = !valid;
   document.getElementById('customWarn').textContent = valid ? '' : '2つ以上の項目を入力してください';
-  if (valid) {
-    items = lines;
-    currentAngle = 0;
-    document.getElementById('result').textContent = '';
-    document.getElementById('mapBtn').style.display = 'none';
-    document.getElementById('resultSearchBtn').hidden = true;
-    drawWheel();
-  }
+  items = valid ? lines : [];
+  currentAngle = 0;
+  clearResult();
+  drawWheel();
 }
 
 // 初期化
@@ -815,3 +873,4 @@ resizeCanvas();
 
 </body>
 </html>
+

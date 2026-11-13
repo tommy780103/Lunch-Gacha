@@ -1,15 +1,24 @@
-# ランチガチャ
+# きょうめし
 
-今日の食事をルーレットで選ぶ Web アプリです。画面はビルド不要で GitHub Pages に公開します。ジャンルを直接選び、評価・口コミ件数・現在地からの距離でお店を探すこともできます。
+まわして決める。選んで探す。
 
-[公開サイト](https://tommy780103.github.io/Lunch-Gacha/)
+今日の食事をルーレットで選ぶ Web アプリです。画面と検索 API を同じ Cloudflare Worker から配信し、Cloudflare Access で本人のメールアドレスだけを許可する構成です。ジャンルを直接選び、評価・口コミ件数・現在地からの距離でお店を探すこともできます。
+
+ガチャの初期選択は「ラーメン・うどん・定食・パスタ・中華」の5つです。他の候補もボタンで追加・解除できます。「コーヒー」はガチャとお店検索の両方にあり、ガチャでは最初は未選択です。
+
+ガチャの候補一覧は選択中の項目を先に表示し、選択・解除すると並びを更新します。選択中・未選択それぞれの中では元の候補順を維持します。
+
+「ルーレット」タブでは、食事に限らない任意の項目を1行ずつ入力して抽選できます。このタブでは見出しとブラウザータイトルが「ルーレット」になり、きょうめしの副題、店舗検索への案内、検索利用回数は表示しません。「ガチャ」「お店検索」に戻ると食事選びの表示へ戻ります。
+
+[本人用サイト](https://lunch-gacha-search.choi-tool.workers.dev/)
 
 ## 構成
 
 - メイン画面・スタイル・ルーレット：ルートの HTML。
+- 配信資産：専用スクリプトが画面に必要な13ファイルだけを生成先へコピーします。バックエンド・文書・秘密情報は配信対象に含めません。
 - 店舗検索：ブラウザから Cloudflare Workers を経由して Google Places API (New) を呼び出します。
 - 共通の利用上限：SQLite Durable Object で全利用者の合計を管理します。
-- 公開設定：`config.js` に検索サーバーの URL を設定します。初期状態は店舗検索無効です。API キーはサーバーの Secret にだけ保存します。
+- 公開設定：画面と同じWorkerの検索URLを設定し、店舗検索を有効にする構成です。API キーはサーバーの Secret にだけ保存します。
 - アイコン：アイコン用フォルダー内の SVG が正本。PNG は iPhone ホーム画面用 180 px、汎用 192 / 512 px、favicon 用 48 px。
 - 再生成：Python スクリプトから ImageMagick を呼び出します。
 - 作業記録：実装記録フォルダーに保存します。
@@ -34,6 +43,8 @@ icons/icon-192.png
 icons/icon-512.png
 icons/favicon.png
 scripts/generate_icons.py
+scripts/build-worker-assets.mjs
+public/                  # 配信用の生成物。Gitには含めません
 _docs/
 ```
 
@@ -73,39 +84,83 @@ iPhone では Safari で公開サイトを開き、「共有」から「ホー�
 node --test tests/*.test.cjs tests/backend.test.mjs
 ```
 
+## 本人限定で配信する
+
+Cloudflare Workers の対象 Worker で Access の保護範囲を「All traffic」にし、Allow ポリシーの Emails には本人のメールアドレス1件だけを登録します。メールドメイン全体・Everyone・Bypass は許可しません。メールアドレスや認証情報は公開コードに記載せず、Cloudflare側で管理します。[Worker単位のAccess設定](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)を参照してください。
+
+トップページ・画像・JavaScript・検索 API のすべてがログインを要求することを確認します。以前の GitHub Pages はリポジトリの Pages 設定で公開を停止し、旧URLから画面を開けないことも確認してください。リポジトリのソース公開と、利用サイトのアクセス制限は別の設定です。
+
+デプロイ前に次のコマンドで静的資産を生成します。画面や設定を変更した場合も、必ず再実行して生成物を更新してください。スクリプトは自身の配置場所を基準に入出力を解決します。
+
+```sh
+node scripts/build-worker-assets.mjs
+```
+
+生成後に同じ Worker をデプロイします。Worker や Durable Object を作り直さず、既存の共有カウンターを維持します。
+
+```sh
+npx wrangler@4.160.0 deploy --config backend/wrangler.toml
+```
+
+画面側の検索通信は同じオリジンにだけ認証Cookieを送信します。認証の有効期限が切れた場合はページを開き直して再ログインしてください。検索機能の有効化は、Access の設定とは別に下記の手順で行います。
+
 ## お店の検索
 
-- ガチャで選ばれた料理から検索する方法と、ジャンルを直接選ぶ方法があります。既存の 13 ジャンルに加えて、任意の料理・ジャンル名も入力できます。
-- 初期条件は「評価 4.0 以上・口コミ 100 件以上・現在地から 5 km 以内」です。条件と並び順を変更できます。
-- API による検索は検索ボタンを押したときだけ実行し、1 回の操作につき 1 リクエストに制限します。自動の追加ページ取得や自動再試行は行いません。
+- ガチャで選ばれた料理から検索する方法と、ジャンルを直接選ぶ方法があります。ジャンルは複数選択でき、任意の料理・店名も1件追加できます。同じ検索語は重複して送信しません。ガチャの結果から進むと、その料理1件を選択した状態になります。
+- 初期条件は「評価 4.0 以上・口コミ 100 件以上・現在地から 1 km 以内」です。条件と並び順を変更できます。
+- 評価は「指定なし・3.5・4.0・4.2・4.5以上」、口コミは「指定なし・50・100・300・500・1,000・5,000件以上」、距離は「100m・500m・1km・3km・5km・10km以内」から選べます。「指定なし」ではその項目が未掲載の店舗も除外しません。
+- 各条件の選択肢の末尾にある「自分で入力」を選ぶと、好きな数値を設定できます。評価は0〜5（小数可）、口コミは0〜1,000,000件の整数、距離は0.1〜50km（小数可）です。空欄・範囲外・口コミの小数は現在地取得や検索の前に止めます。評価と口コミの0は「指定なし」と同じ扱いです。既存の選択肢へ戻すと手入力値は検索に使いません。
+- 「ガチャ」「お店検索」の画面下部に、全利用者合計の今月の検索回数・月の残り回数・本日の残り回数を表示します。「ルーレット」タブでは非表示です。回数の確認だけでは検索枠を消費せず、Googleへの通信や現在地の取得も行いません。取得に失敗した場合は回数を推測せず、確認できない旨を表示します。
+- API による検索は検索ボタンを押したときだけ、選択したジャンルを1件ずつ順に実行します。1ジャンルにつき最大1回分の検索枠を使うため、実行前に使用予定の最大回数を表示します。位置情報の取得は1操作につき1回です。自動の追加ページ取得や自動再試行は行いません。
 - Google への検索は、全利用者の合計で **1 日 20 回・1 か月 600 回**までです。いずれかの上限で停止します。日付・月は米国太平洋時間（`America/Los_Angeles`）で切り替わります。
-- Google が返す最大 20 候補を条件で絞り、最大 10 店舗を表示します。周辺の全店舗を網羅した順位ではありません。距離は直線距離です。
+- Googleがジャンルごとに返す最大20候補を条件で絞り、同じ店舗を統合して、選んだ並び順で全体の最大10店舗を表示します。カードには見つかった検索ジャンルを付け、複数ジャンルで見つかった店舗には複数のラベルを表示します。ラベルは検索語であり、Googleの公式カテゴリではありません。周辺の全店舗を網羅した順位ではなく、距離は直線距離です。
+- 上限や通信エラーで途中停止した場合、先に取得できた結果を残し、検索できなかったジャンルを案内します。消費回数は成功したジャンル数から推測せず、サーバーが返した共有回数を表示します。
 - 条件に合う候補がない場合、条件を自動で緩めず、その旨を表示します。
 - API 未設定・利用上限・接続エラーなどの場合にも、通常の Google マップ検索を利用できます。通常検索には評価・口コミ件数の条件は適用されません。
 
-## Google Places 連携を有効にする
+## Google Places 連携の設定
 
-画面とサーバーの両方を初期状態では無効にしています。設定完了までは Google Places への店舗検索リクエストを送信しません。キーなしで評価や口コミ件数を取得することはできません。
+画面とサーバーの検索設定を有効にしています。Cloudflare Accessで本人認証した後、検索ボタンを押したときだけ共有上限を確認してGoogleへ問い合わせます。キーが未登録の場合や上限に達した場合はGoogleを呼びません。
 
 ```js
 window.LUNCH_GACHA_CONFIG = Object.freeze({
-  searchEndpoint: '',
-  placesEnabled: false
+  searchEndpoint: 'https://lunch-gacha-search.choi-tool.workers.dev/search',
+  placesEnabled: true
 });
+```
+
+新しい環境で初回設定をする場合は、画面とサーバーをいったん無効にし、次の準備が完了してから有効化してください。利用を停止する場合も同じ設定に戻して再デプロイします。共有カウンターやAccessポリシーは削除しません。
+
+```javascript
+placesEnabled: false
+```
+
+```toml
+SEARCH_ENABLED = "false"
 ```
 
 1. [Google Cloud Console](https://console.cloud.google.com/)でこのアプリ用のプロジェクトを用意し、[課金アカウント](https://console.cloud.google.com/billing)を設定して [**Places API (New)**](https://console.cloud.google.com/apis/library/places.googleapis.com) を有効にします。各画面で選択中のプロジェクトを確認してください。
 2. [認証情報](https://console.cloud.google.com/apis/credentials)からサーバー用 API キーを作成し、API の制限を **Places API (New) だけ**に限定します。Cloudflare のサーバーから呼び出すため、ブラウザ用のウェブサイト制限は使用しません。API キーを `config.js`、HTML、GitHub に書かないでください。
 3. Google の料金と同じ課金アカウントの利用を確認します。評価・口コミ件数を含む検索は **Text Search Enterprise** に該当し、2026 年 11 月 11 日に確認した無料枠は月 1,000 リクエストです。このアプリは月 600 回で止めますが、他のアプリ・プロジェクトの同じ料金区分の利用も合算されます。[割り当てとシステム上限](https://console.cloud.google.com/iam-admin/quotas)で設定可能な上限も確認してください。
-4. [Cloudflare ダッシュボード](https://dash.cloudflare.com/)で **Workers Free プラン**を用意し、[サーバー設定手順](./backend/README.md)に従ってログインします。`backend/wrangler.toml` の `ALLOWED_ORIGIN` を画面のオリジンに合わせます。公開サイトの初期値は `https://tommy780103.github.io` です。
+4. [Cloudflare ダッシュボード](https://dash.cloudflare.com/)で **Workers Free プラン**を用意し、[サーバー設定手順](./backend/README.md)に従ってログインします。画面と検索 API を同じ Worker から配信し、許可OriginをそのHTTPSオリジンに合わせます。本人限定の Access 設定と、旧 GitHub Pages の公開停止を先に確認してください。
 5. Google のキーを Cloudflare の Secret `GOOGLE_PLACES_API_KEY` に登録し、Worker をデプロイします。キー・無料枠・設定を確認後、`SEARCH_ENABLED` を `"true"` にして再デプロイします。
-6. 発行された検索 URL（例：`https://<worker>.workers.dev/search`）を `config.js` の `searchEndpoint` に設定し、`placesEnabled` を `true` にします。実際の検索・利用数・上限時の案内を確認します。
+6. 同じ Worker の検索 URL を画面側の設定に登録して有効化し、資産を再生成してから再デプロイします。実際の検索・利用数・上限時の案内を確認します。
+
+```text
+https://lunch-gacha-search.choi-tool.workers.dev/search
+```
 
 リポジトリのルートで使う主なコマンドは次のとおりです。Secret の入力欄にキーを入力します。
 
 ```sh
 npx wrangler@4.160.0 login
+```
+
+```sh
 npx wrangler@4.160.0 deploy --config backend/wrangler.toml
+```
+
+```sh
 npx wrangler@4.160.0 secret put GOOGLE_PLACES_API_KEY --config backend/wrangler.toml
 ```
 
@@ -121,7 +176,7 @@ Cloudflare Workers と SQLite Durable Objects は Free プランの範囲で利�
 
 ### 設定・検証の状況
 
-Google Cloud の課金設定・API キー・割り当て設定、Cloudflare へのサーバー公開は、この実装時点では未完了または未確認です。`config.js` とサーバー設定は無効のままです。実店舗データによる検索は未実施です。API を利用しない検証結果は [実装記録](./_docs/2026-11-11_restaurant-search.md) に記載します。
+画面側とサーバー側の検索設定は有効化する構成へ変更しました。本番反映と実店舗検索の結果は[有効化の実装記録](./_docs/2026-11-12_google-search-enabled.md)で区別して記録します。Cloudflare Access、Google側のキー制限・請求先の利用量・割り当てはリポジトリ外の設定なので、コードのデプロイだけで確認済みとは判断しません。共有上限の設計とモック検証は[店舗検索の実装記録](./_docs/2026-11-11_restaurant-search.md)を参照してください。
 
 ### 公式資料
 
@@ -135,3 +190,5 @@ Google Cloud の課金設定・API キー・割り当て設定、Cloudflare へ�
 - [Cloudflare Durable Objects の料金・無料枠](https://developers.cloudflare.com/durable-objects/platform/pricing/)
 - [Cloudflare Workers の利用上限](https://developers.cloudflare.com/workers/platform/limits/)
 - [Cloudflare の Secret 設定](https://developers.cloudflare.com/workers/configuration/secrets/)
+- [Worker 単位の Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
+

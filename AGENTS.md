@@ -1,4 +1,4 @@
-# ランチガチャの開発案内
+# きょうめしの開発案内
 
 ## 最初に読む
 
@@ -26,3 +26,4 @@ icons/
 scripts/generate_icons.py
 _docs/YYYY-MM-DD_内容.md
 ```
+

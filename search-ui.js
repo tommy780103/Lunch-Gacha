@@ -5,7 +5,51 @@
   let busy = false;
   let generation = 0;
   let origin = null;
+  const selectedGenres = new Set();
   const byId = id => document.getElementById(id);
+  const numericFilters = [
+    { id: 'minRating', min: 0, max: 5, message: '評価は0〜5の数値で入力してください。' },
+    { id: 'minReviews', min: 0, max: 1000000, integer: true, message: '口コミ件数は0〜1,000,000の整数で入力してください。' },
+    { id: 'radiusKm', min: 0.1, max: 50, message: '距離は0.1〜50kmの数値で入力してください。' }
+  ];
+
+  function syncCustomFilters() {
+    for (const { id } of numericFilters) {
+      const selected = byId(id).value === 'custom';
+      const input = byId(`${id}Custom`);
+      byId(`${id}CustomField`).hidden = !selected;
+      input.disabled = busy || !selected;
+      input.required = selected;
+      if (!selected) {
+        input.setCustomValidity('');
+        input.removeAttribute('aria-invalid');
+      }
+    }
+  }
+
+  function readCriteria() {
+    const values = { sort: byId('sortOrder').value };
+    for (const { id, min, max, integer, message } of numericFilters) {
+      const field = byId(id).value === 'custom' ? byId(`${id}Custom`) : byId(id);
+      const raw = field.value.trim();
+      const value = Number(raw);
+      // Validate before normalization: a blank, invalid or out-of-range custom
+      // value must never silently become a default, rounded value or bound.
+      const numeric = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(raw);
+      if (!numeric || field.validity?.badInput || !Number.isFinite(value) || value < min || value > max || (integer && !Number.isSafeInteger(value))) {
+        field.setCustomValidity(message);
+        field.setAttribute('aria-invalid', 'true');
+        setStatus(message, 'error');
+        field.focus();
+        field.reportValidity();
+        return null;
+      }
+      field.setCustomValidity('');
+      field.removeAttribute('aria-invalid');
+      values[id] = value;
+    }
+    return LunchSearchCore.normalizeCriteria(values);
+  }
 
   function setStatus(message, state = 'ready') {
     byId('searchStatus').textContent = message;
@@ -13,8 +57,12 @@
   }
 
   function updateFallback() {
-    const genre = byId('genreInput').value.trim();
-    byId('normalSearchLink').href = LunchSearchCore.buildSearchUrl(genre || '飲食店', origin);
+    const genres = getSelectedGenres();
+    byId('normalSearchLink').href = LunchSearchCore.buildSearchUrl(genres, origin);
+  }
+
+  function getSelectedGenres() {
+    return LunchSearchCore.normalizeGenres([...selectedGenres, byId('genreInput').value]);
   }
 
   function clearResults() {
@@ -27,10 +75,11 @@
   }
 
   function syncGenres() {
-    const chosen = byId('genreInput').value.trim();
     byId('genreGrid').querySelectorAll('button').forEach(button => {
-      button.setAttribute('aria-pressed', String(button.dataset.genre === chosen));
+      button.setAttribute('aria-pressed', String(selectedGenres.has(button.dataset.genre)));
     });
+    const count = getSelectedGenres().length;
+    byId('genreSelectionSummary').textContent = `${count}ジャンル選択中／検索は最大${count}回分使用（全利用者で1日20回・月600回まで）`;
   }
 
   function readyMessage() {
@@ -44,17 +93,38 @@
 
   function updateQuota() {
     const element = byId('searchQuota');
-    element.hidden = !LunchPlaces.isConfigured();
-    if (element.hidden) return;
     const quota = LunchPlaces.getQuota();
-    element.textContent = quota
-      ? `検索受付：本日 ${quota.dayUsed} / ${quota.dayLimit}回・今月 ${quota.monthUsed} / ${quota.monthLimit}回（全利用者合計）`
-      : '条件つき検索は全利用者で1日20回・月600回まで。上限に達すると自動で停止します。';
-    element.textContent += ' 失敗した通信も回数に含み、日・月の切り替えは米国太平洋時間です。';
+    const state = LunchPlaces.getQuotaStatus();
+    element.dataset.state = state;
+    const unknown = state === 'error' ? '取得できません' : '確認中…';
+    byId('quotaMonthUsed').textContent = quota ? `${quota.monthUsed}回` : unknown;
+    byId('quotaMonthRemaining').textContent = quota ? `${quota.monthLimit - quota.monthUsed}回` : unknown;
+    byId('quotaDayRemaining').textContent = quota ? `${quota.dayLimit - quota.dayUsed}回` : unknown;
+    let message = state === 'error' ? '利用回数を取得できませんでした。「更新」でもう一度確認できます。' : '利用回数を確認中です。';
+    if (quota) {
+      message = quota.monthUsed === quota.monthLimit ? '今月の検索上限に達しました。'
+        : quota.dayUsed === quota.dayLimit ? '今日の検索上限に達しました。今月の残りがあっても、今日は検索できません。'
+        : '全利用者で共通の回数です。検索のたびに表示を更新します。';
+    }
+    byId('quotaStatus').textContent = message;
+    byId('quotaRefreshBtn').disabled = busy || state === 'loading';
+  }
+
+  async function refreshQuota() {
+    if (busy) return;
+    const request = LunchPlaces.refreshQuota();
+    updateQuota();
+    try { await request; }
+    catch (_) { /* The adapter exposes an unknown count and error state. */ }
+    finally { updateQuota(); }
   }
 
   function chooseGenre(genre) {
-    byId('genreInput').value = String(genre).trim().slice(0, 80);
+    const chosen = LunchSearchCore.normalizeGenres([genre])[0] || '';
+    const preset = options.genres.find(item => LunchSearchCore.genreQuery(item) === LunchSearchCore.genreQuery(chosen));
+    selectedGenres.clear();
+    if (preset) selectedGenres.add(preset);
+    byId('genreInput').value = preset ? '' : chosen;
     syncGenres();
     clearResults();
     readyMessage();
@@ -65,8 +135,10 @@
     byId('restaurantSearchForm').querySelectorAll('input, select, button').forEach(control => {
       control.disabled = value;
     });
+    syncCustomFilters();
     byId('searchBtn').textContent = value ? 'お店を探しています…' : 'この条件でお店を検索';
     byId('searchPanel').setAttribute('aria-busy', String(value));
+    updateQuota();
   }
 
   function createTextElement(tag, className, text) {
@@ -83,17 +155,21 @@
     } catch { return null; }
   }
 
-  function renderResults(places, genre, criteria) {
+  function renderResults(places, genres, criteria) {
     const list = byId('restaurantList');
     list.replaceChildren();
     for (const [index, place] of places.entries()) {
       const card = createTextElement('li', 'restaurant-card', '');
       card.append(createTextElement('h4', '', `${index + 1}. ${place.name}`));
       const stats = createTextElement('div', 'restaurant-stats', '');
-      stats.append(createTextElement('span', 'restaurant-rating', `★${place.rating.toFixed(1)}`));
-      stats.append(createTextElement('span', '', `口コミ ${place.reviewCount.toLocaleString('ja-JP')}件`));
-      stats.append(createTextElement('span', '', `${place.distanceKm.toFixed(1)}km`));
+      stats.append(createTextElement('span', 'restaurant-rating', place.rating === null ? '評価情報なし' : `★${place.rating.toFixed(1)}`));
+      stats.append(createTextElement('span', '', place.reviewCount === null ? '口コミ情報なし' : `口コミ ${place.reviewCount.toLocaleString('ja-JP')}件`));
+      stats.append(createTextElement('span', '', LunchSearchCore.formatDistance(place.distanceKm)));
       card.append(stats);
+      const tags = createTextElement('div', 'restaurant-genres', '');
+      tags.append(createTextElement('span', 'restaurant-genres-label', '検索ジャンル：'));
+      for (const genre of place.genres) tags.append(createTextElement('span', 'restaurant-genre-tag', genre));
+      card.append(tags);
       const href = safeExternalLink(place.mapsUrl);
       if (href) {
         const link = createTextElement('a', 'restaurant-link', 'Googleマップでお店を見る ↗');
@@ -119,63 +195,99 @@
       }
       list.append(card);
     }
-    byId('resultsTitle').textContent = `${genre}のお店 ${places.length}件`;
-    const sortLabel = { rating: '評価が高い順', reviews: '口コミが多い順', distance: '近い順' }[criteria.sort];
-    byId('resultCriteria').textContent = `★${criteria.minRating.toFixed(1)}以上・口コミ${criteria.minReviews}件以上・${criteria.radiusKm}km以内 ／ ${sortLabel}`;
+    byId('resultsTitle').textContent = `お店 ${places.length}件`;
+    byId('resultGenres').textContent = `検索済み：${genres.join('、')}`;
+    byId('resultCriteria').textContent = LunchSearchCore.describeCriteria(criteria);
     byId('searchResults').hidden = false;
     const shortlist = LunchSearchCore.buildShortlistUrl(places.map(place => place.id));
     if (shortlist && places.length) {
       byId('shortlistLink').href = shortlist;
       byId('shortlistLink').hidden = false;
     }
-    if (!places.length) {
-      setStatus('取得した候補に、条件に合うお店がありませんでした。距離を広げるか、評価・口コミ件数の条件を変更して検索してください。', 'empty');
+  }
+
+  function errorMessage(error) {
+    const messages = {
+      NOT_CONFIGURED: '条件つき検索は準備中です。',
+      QUOTA_EXCEEDED: '条件つき検索の利用上限に達したため、検索を停止しました。',
+      QUOTA_UNAVAILABLE: '利用回数を確認できないため、検索を停止しました。利用回数の「更新」でもう一度確認できます。',
+      LOCATION_DENIED: '現在地の利用が許可されていません。ブラウザーの位置情報設定を確認してください。',
+      LOCATION_UNAVAILABLE: '現在地を取得できませんでした。時間をおいてお試しください。',
+      NETWORK: '通信できなかったため、検索を停止しました。接続を確認してください。'
+    };
+    return messages[error.code] || 'お店情報を取得できなかったため、検索を停止しました。';
+  }
+
+  function showBatchOutcome(groups, genres, criteria, stopped) {
+    const places = LunchSearchCore.mergeGenreResults(groups, criteria);
+    if (groups.length) renderResults(places, groups.map(group => group.genre), criteria);
+    if (stopped) {
+      const progress = groups.length ? `${genres.length}ジャンル中${groups.length}ジャンルを検索し、${places.length}件を表示しています。` : '';
+      const failed = stopped.failed ? ` 検索できなかったジャンル：${stopped.failed}。` : '';
+      const remaining = stopped.unsearched.length ? ` 未検索：${stopped.unsearched.join('、')}。` : '';
+      setStatus(`${progress}${errorMessage(stopped.error)}${failed}${remaining}`, groups.length ? 'partial' : 'error');
+    } else if (!places.length) {
+      setStatus(`${genres.length}ジャンルを検索しましたが、条件に合うお店がありませんでした。距離や評価・口コミ件数の条件を変更して検索してください。`, 'empty');
     } else {
-      setStatus(`${places.length}件見つかりました。気になるお店をGoogleマップで確認できます。`, 'success');
+      setStatus(`${genres.length}ジャンルを検索し、${places.length}件見つかりました。気になるお店をGoogleマップで確認できます。`, 'success');
     }
   }
 
   async function search(event) {
     event.preventDefault();
     if (busy) return;
-    const genre = byId('genreInput').value.trim();
-    if (!genre) {
-      setStatus('ジャンルを選ぶか、店名を入力してください。', 'error');
+    const genres = getSelectedGenres();
+    if (!genres.length) {
+      setStatus('ジャンルを1つ以上選ぶか、追加のジャンル・店名を入力してください。', 'error');
       byId('genreInput').focus();
       return;
     }
+    const criteria = readCriteria();
+    if (!criteria) return;
     clearResults();
     if (!LunchPlaces.isConfigured()) {
       readyMessage();
       return;
     }
-    const criteria = LunchSearchCore.normalizeCriteria({
-      minRating: Number(byId('minRating').value),
-      minReviews: Number(byId('minReviews').value),
-      radiusKm: Number(byId('radiusKm').value),
-      sort: byId('sortOrder').value
-    });
     const requestGeneration = generation;
+    const groups = [];
     setBusy(true);
     setStatus('現在地を確認しています…', 'loading');
     try {
       origin = await options.getLocation();
       if (generation !== requestGeneration) return;
       updateFallback();
-      setStatus('評価・口コミ件数を確認して、お店を探しています…', 'loading');
-      const places = await LunchPlaces.search(genre, origin, criteria);
-      if (generation !== requestGeneration) return;
-      renderResults(places, genre, criteria);
+      for (const [index, genre] of genres.entries()) {
+        if (generation !== requestGeneration) return;
+        const quota = LunchPlaces.getQuota();
+        // The first POST checks the authoritative server state, including a
+        // period rollover. Only this batch's fresh counts gate later searches.
+        if (index > 0 && (!quota || quota.dayUsed >= quota.dayLimit || quota.monthUsed >= quota.monthLimit)) {
+          showBatchOutcome(groups, genres, criteria, {
+            error: { code: quota ? 'QUOTA_EXCEEDED' : 'QUOTA_UNAVAILABLE' }, unsearched: genres.slice(index)
+          });
+          return;
+        }
+        setStatus(`${index + 1}/${genres.length}ジャンル目：${genre}のお店を探しています…`, 'loading');
+        try {
+          if (generation !== requestGeneration) return;
+          const request = LunchPlaces.search(genre, origin, criteria);
+          updateQuota();
+          const places = await request;
+          if (generation !== requestGeneration) return;
+          groups.push({ genre, places });
+          renderResults(LunchSearchCore.mergeGenreResults(groups, criteria), groups.map(group => group.genre), criteria);
+          updateQuota();
+        } catch (error) {
+          if (generation !== requestGeneration) return;
+          showBatchOutcome(groups, genres, criteria, { error, failed: genre, unsearched: genres.slice(index + 1) });
+          return;
+        }
+      }
+      showBatchOutcome(groups, genres, criteria);
     } catch (error) {
       if (generation !== requestGeneration) return;
-      const messages = {
-        NOT_CONFIGURED: '条件つき検索は準備中です。通常のGoogleマップ検索をご利用ください。',
-        QUOTA_EXCEEDED: '条件つき検索の利用上限に達しました。通常のGoogleマップ検索をご利用ください。',
-        LOCATION_DENIED: '現在地の利用が許可されていません。ブラウザーの位置情報設定を確認するか、通常のGoogleマップ検索をご利用ください。',
-        LOCATION_UNAVAILABLE: '現在地を取得できませんでした。時間をおいて試すか、通常のGoogleマップ検索をご利用ください。',
-        NETWORK: '通信できませんでした。接続を確認して、もう一度お試しください。'
-      };
-      setStatus(messages[error.code] || '条件つき検索を利用できませんでした。通常のGoogleマップ検索をご利用ください。', 'error');
+      showBatchOutcome(groups, genres, criteria, { error, unsearched: genres.slice(groups.length) });
     } finally {
       updateQuota();
       setBusy(false);
@@ -190,7 +302,14 @@
       button.type = 'button';
       button.dataset.genre = genre;
       button.setAttribute('aria-pressed', 'false');
-      button.addEventListener('click', () => chooseGenre(genre));
+      button.addEventListener('click', () => {
+        if (busy) return;
+        if (selectedGenres.has(genre)) selectedGenres.delete(genre);
+        else selectedGenres.add(genre);
+        syncGenres();
+        clearResults();
+        readyMessage();
+      });
       grid.append(button);
     }
     byId('genreInput').addEventListener('input', () => {
@@ -199,11 +318,29 @@
       readyMessage();
     });
     ['minRating', 'minReviews', 'radiusKm', 'sortOrder'].forEach(id => {
-      byId(id).addEventListener('change', () => { clearResults(); readyMessage(); });
+      byId(id).addEventListener('change', () => {
+        byId(id).setCustomValidity('');
+        byId(id).removeAttribute('aria-invalid');
+        syncCustomFilters();
+        clearResults();
+        readyMessage();
+      });
     });
+    for (const { id } of numericFilters) {
+      byId(`${id}Custom`).addEventListener('input', () => {
+        byId(`${id}Custom`).setCustomValidity('');
+        byId(`${id}Custom`).removeAttribute('aria-invalid');
+        clearResults();
+        readyMessage();
+      });
+    }
     byId('restaurantSearchForm').addEventListener('submit', search);
+    byId('quotaRefreshBtn').addEventListener('click', refreshQuota);
+    syncCustomFilters();
     chooseGenre(settings.genres[0]);
+    refreshQuota();
   }
 
   window.LunchSearchUI = Object.freeze({ init, chooseGenre });
 })();
+

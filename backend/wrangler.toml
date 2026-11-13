@@ -2,11 +2,16 @@ name = "lunch-gacha-search"
 main = "worker.mjs"
 compatibility_date = "2026-11-11"
 workers_dev = true
+preview_urls = false
+
+[assets]
+directory = "../public"
+run_worker_first = ["/search", "/quota"]
 
 [vars]
-ALLOWED_ORIGIN = "https://tommy780103.github.io"
-# Enable only after setting the secret and verifying the account's free usage.
-SEARCH_ENABLED = "false"
+ALLOWED_ORIGIN = "https://lunch-gacha-search.choi-tool.workers.dev"
+# Set false to stop searches without changing the shared quota or Access policy.
+SEARCH_ENABLED = "true"
 
 [[durable_objects.bindings]]
 name = "GLOBAL_QUOTA"
@@ -15,3 +20,4 @@ class_name = "SearchQuota"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SearchQuota"]
+
